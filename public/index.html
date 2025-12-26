@@ -1466,10 +1466,11 @@
         <div class="card" style="background:#f0f0f0; margin-bottom:20px;">
           <h2 style="font-size:14px; color:#666;">🔧 调试信息</h2>
           <p style="font-size:12px; color:#666; margin:0;">
-            API 地址: <code id="apiUrl">http://localhost:3000</code><br>
+            API 地址: <code id="apiUrl"></code><br>
             服务器状态: <span id="serverStatus">检查中...</span>
           </p>
         </div>
+        <script>document.getElementById('apiUrl').textContent = window.location.origin;</script>
 
         <!-- Module 1: Mailbox Management -->
         <div class="feature-module active" id="module-mailbox-management">
@@ -3555,7 +3556,7 @@
         });
         clearTimeout(timeoutId);
         
-        document.getElementById('serverStatus').innerHTML = '✅ 服务器运行中 (http://localhost:3000)';
+        document.getElementById('serverStatus').innerHTML = '✅ 服务器运行中';
         document.getElementById('serverStatus').style.color = '#2e7d32';
       } catch (e) {
         if (e.name === 'AbortError') {
