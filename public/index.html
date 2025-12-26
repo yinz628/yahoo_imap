@@ -2828,7 +2828,12 @@
       
       // Get folders from the folder select in extraction module
       const folderSelect = document.getElementById('folder');
-      const folders = Array.from(folderSelect.options).map(opt => opt.value);
+      let folders = Array.from(folderSelect.options).map(opt => opt.value);
+      
+      // Filter out virtual parent folders that can't be selected (like [Gmail])
+      // These are folders that have children but can't contain emails themselves
+      const virtualFolders = ['[Gmail]', '[Google Mail]'];
+      folders = folders.filter(f => !virtualFolders.includes(f));
       
       if (folders.length === 0) {
         folderList.innerHTML = '<p style="color:#666; font-size:13px;">没有找到文件夹</p>';
@@ -3828,8 +3833,12 @@
           document.getElementById('connectedInfo').classList.remove('hidden');
           document.getElementById('connectedEmail').textContent = email;
           
+          // Filter out virtual parent folders (like [Gmail])
+          const virtualFolders = ['[Gmail]', '[Google Mail]'];
+          const validFolders = data.folders.filter(f => !virtualFolders.includes(f));
+          
           const folderSelect = document.getElementById('folder');
-          folderSelect.innerHTML = data.folders.map(f => `<option value="${f}">${f}</option>`).join('');
+          folderSelect.innerHTML = validFolders.map(f => `<option value="${f}">${f}</option>`).join('');
           
           showStatus('connectionStatus', '✅ 连接成功！', 'success');
           
