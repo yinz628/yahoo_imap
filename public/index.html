@@ -4391,7 +4391,17 @@
                 document.getElementById('progressText').textContent = `${data.processed} / ${totalEmails}`;
                 
                 if (data.matches && data.matches.length > 0) {
-                  data.matches.forEach(match => {
+                  // Deduplicate matches
+                  const seenInBatch = new Set();
+                  const uniqueMatches = data.matches.filter(match => {
+                    if (seenInBatch.has(match.fullMatch)) {
+                      return false;
+                    }
+                    seenInBatch.add(match.fullMatch);
+                    return true;
+                  });
+                  
+                  uniqueMatches.forEach(match => {
                     totalMatches++;
                     matchesList.push(match);
                     
@@ -4455,12 +4465,23 @@
 
       results.forEach(r => {
         if (r.matches.length === 0) return;
-        r.matches.forEach((m, i) => {
+        
+        // Deduplicate matches by fullMatch value
+        const seenMatches = new Set();
+        const uniqueMatches = r.matches.filter(m => {
+          if (seenMatches.has(m.fullMatch)) {
+            return false;
+          }
+          seenMatches.add(m.fullMatch);
+          return true;
+        });
+        
+        uniqueMatches.forEach((m, i) => {
           html += '<tr>';
           if (i === 0) {
-            html += `<td rowspan="${r.matches.length}">${new Date(r.email.date).toLocaleDateString()}</td>`;
-            html += `<td rowspan="${r.matches.length}">${escapeHtml(r.email.from)}</td>`;
-            html += `<td rowspan="${r.matches.length}">${escapeHtml(r.email.subject)}</td>`;
+            html += `<td rowspan="${uniqueMatches.length}">${new Date(r.email.date).toLocaleDateString()}</td>`;
+            html += `<td rowspan="${uniqueMatches.length}">${escapeHtml(r.email.from)}</td>`;
+            html += `<td rowspan="${uniqueMatches.length}">${escapeHtml(r.email.subject)}</td>`;
           }
           html += `<td><span class="match">${escapeHtml(m.fullMatch)}</span></td>`;
           groups.forEach(g => html += `<td>${escapeHtml(m.groups[g] || '')}</td>`);
@@ -4485,7 +4506,17 @@
       let csv = 'Date,From,Subject,Match,' + groups.join(',') + '\n';
       
       extractedResults.forEach(r => {
-        r.matches.forEach(m => {
+        // Deduplicate matches by fullMatch value
+        const seenMatches = new Set();
+        const uniqueMatches = r.matches.filter(m => {
+          if (seenMatches.has(m.fullMatch)) {
+            return false;
+          }
+          seenMatches.add(m.fullMatch);
+          return true;
+        });
+        
+        uniqueMatches.forEach(m => {
           csv += `"${new Date(r.email.date).toISOString()}",`;
           csv += `"${r.email.from.replace(/"/g, '""')}",`;
           csv += `"${r.email.subject.replace(/"/g, '""')}",`;
