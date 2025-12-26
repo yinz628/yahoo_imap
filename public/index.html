@@ -3934,6 +3934,9 @@
       countResult.textContent = '正在统计... (最多等待 30 秒)';
       countResult.className = 'status info';
       
+      // Reset rule editor for new extraction task
+      clearRuleEditor();
+      
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 35000);
@@ -3972,6 +3975,9 @@
       
       // Reset search state
       clearPreviewSearch();
+      
+      // Reset rule editor for new extraction task
+      clearRuleEditor();
       
       try {
         const res = await apiPost('/api/preview', { sessionId, filter: getFilter() });
