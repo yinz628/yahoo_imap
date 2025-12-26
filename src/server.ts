@@ -1531,6 +1531,47 @@ app.post('/api/emails/batch-delete', async (req, res) => {
 // ============================================
 
 /**
+ * POST /api/folders - Get list of all folders
+ */
+app.post('/api/folders', async (req, res) => {
+  const { sessionId } = req.body;
+  const session = await ensureSessionConnected(sessionId);
+  
+  if (!session) {
+    return res.status(400).json({ error: 'Not connected' });
+  }
+
+  try {
+    const connection = session.connection;
+    const rawFolders = await connection.list();
+    
+    // Process folders with display names
+    const folders = rawFolders.map((f: { path: string; name: string }) => {
+      let displayName = f.path;
+      
+      // Add Chinese display names for common folders
+      const lowerPath = f.path.toLowerCase();
+      if (lowerPath === 'inbox') displayName = 'INBOX (收件箱)';
+      else if (lowerPath === 'sent' || lowerPath === 'sent messages' || f.path === '[Gmail]/Sent Mail') displayName = f.path + ' (已发送)';
+      else if (lowerPath === 'drafts' || f.path === '[Gmail]/Drafts') displayName = f.path + ' (草稿)';
+      else if (lowerPath === 'trash' || lowerPath === 'deleted' || f.path === '[Gmail]/Trash') displayName = f.path + ' (回收站)';
+      else if (lowerPath === 'spam' || lowerPath === 'junk' || lowerPath === 'bulk' || f.path === '[Gmail]/Spam') displayName = f.path + ' (垃圾邮件)';
+      else if (lowerPath === 'archive' || f.path === '[Gmail]/All Mail') displayName = f.path + ' (归档)';
+      
+      return {
+        name: f.path,
+        displayName
+      };
+    }).filter((f: { name: string }) => f.name !== '[Gmail]'); // Filter out virtual [Gmail] folder
+    
+    res.json({ folders });
+  } catch (error) {
+    console.error('[FolderList] Error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+});
+
+/**
  * POST /api/folders/create - Create a new folder
  */
 app.post('/api/folders/create', async (req, res) => {
