@@ -327,7 +327,7 @@ export class EmailDeleter {
   /**
    * Delete emails by moving them to Trash folder.
    * For Gmail, uses messageMove to [Gmail]/Trash.
-   * For other providers, uses messageDelete which typically moves to Trash.
+   * For Yahoo and other providers, uses messageMove to Trash folder.
    * 
    * @param connection - Active IMAP connection
    * @param filter - Filter criteria for emails to delete
@@ -348,11 +348,15 @@ export class EmailDeleter {
       return { deleted: 0, errors: 0 };
     }
 
-    // Detect if this is Gmail by checking for Gmail-specific folders
+    // Get trash folder name for this provider
     const trashFolder = await this.getTrashFolderName(connection);
-    const isGmail = trashFolder?.startsWith('[Gmail]') || false;
     
-    console.log(`[Deleter] Provider detected: ${isGmail ? 'Gmail' : 'Other'}, Trash folder: ${trashFolder}`);
+    console.log(`[Deleter] Trash folder: ${trashFolder}`);
+
+    if (!trashFolder) {
+      console.error('[Deleter] Could not find Trash folder, aborting delete');
+      return { deleted: 0, errors: uids.length };
+    }
 
     // Open mailbox in write mode
     await connection.mailboxOpen(folder, { readOnly: false });
@@ -368,14 +372,9 @@ export class EmailDeleter {
         const range = batch.join(',');
         
         try {
-          if (isGmail && trashFolder) {
-            // Gmail: Move to Trash folder instead of delete
-            await connection.messageMove(range, trashFolder, { uid: true });
-            console.log(`[Deleter] Gmail: Moved ${batch.length} emails to ${trashFolder}`);
-          } else {
-            // Other providers: Use messageDelete (typically moves to Trash)
-            await connection.messageDelete(range, { uid: true });
-          }
+          // Always use messageMove to Trash folder (safer than messageDelete)
+          await connection.messageMove(range, trashFolder, { uid: true });
+          console.log(`[Deleter] Moved ${batch.length} emails to ${trashFolder}`);
           deleted += batch.length;
           
           if (onProgress) {

@@ -2845,11 +2845,12 @@
       // Render folder list
       folderList.innerHTML = folders.map(folder => {
         const icon = getFolderIcon(folder);
+        const displayName = getFolderDisplayName(folder);
         const isActive = emailMgmtState.currentFolder === folder;
         return `
           <div class="folder-item ${isActive ? 'active' : ''}" onclick="selectEmailFolder('${escapeHtml(folder)}')">
             <span class="folder-icon">${icon}</span>
-            <span class="folder-name">${escapeHtml(folder)}</span>
+            <span class="folder-name">${escapeHtml(displayName)}</span>
           </div>
         `;
       }).join('');
@@ -2867,9 +2868,17 @@
       if (name.includes('sent')) return '📤';
       if (name.includes('draft')) return '📝';
       if (name.includes('trash') || name.includes('deleted')) return '🗑️';
-      if (name.includes('spam') || name.includes('junk')) return '⚠️';
+      if (name.includes('spam') || name.includes('junk') || name === 'bulk') return '⚠️';
       if (name.includes('archive')) return '📦';
       return '📁';
+    }
+    
+    // Get display name for folder (translate system folder names)
+    function getFolderDisplayName(folderName) {
+      const name = folderName.toLowerCase();
+      // Yahoo Bulk folder is actually Spam
+      if (name === 'bulk') return 'Bulk (垃圾邮件)';
+      return folderName;
     }
     
     // Select a folder and load emails

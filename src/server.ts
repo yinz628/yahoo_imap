@@ -1475,14 +1475,14 @@ app.post('/api/emails/batch-delete', async (req, res) => {
     console.log(`[BatchDelete] Deleting ${uids.length} emails from ${folder}`);
     
     const connection = session.connection;
-    const isGmail = session.provider === 'gmail';
     
-    // For Gmail, we need to move to Trash folder instead of delete
-    let trashFolder: string | null = null;
-    if (isGmail) {
-      const deleter = new EmailDeleter();
-      trashFolder = await deleter.getTrashFolderName(connection);
-      console.log(`[BatchDelete] Gmail detected, trash folder: ${trashFolder}`);
+    // Get trash folder for this provider
+    const deleter = new EmailDeleter();
+    const trashFolder = await deleter.getTrashFolderName(connection);
+    console.log(`[BatchDelete] Provider: ${session.provider}, Trash folder: ${trashFolder}`);
+    
+    if (!trashFolder) {
+      return res.status(500).json({ error: 'Could not find Trash folder' });
     }
     
     // Open the mailbox in write mode
@@ -1499,14 +1499,9 @@ app.post('/api/emails/batch-delete', async (req, res) => {
         const range = batch.join(',');
         
         try {
-          if (isGmail && trashFolder) {
-            // Gmail: Move to Trash folder
-            await connection.messageMove(range, trashFolder, { uid: true });
-            console.log(`[BatchDelete] Gmail: Moved ${batch.length} emails to ${trashFolder}`);
-          } else {
-            // Other providers: Use messageDelete (typically moves to Trash)
-            await connection.messageDelete(range, { uid: true });
-          }
+          // Always use messageMove to Trash (safer than messageDelete)
+          await connection.messageMove(range, trashFolder, { uid: true });
+          console.log(`[BatchDelete] Moved ${batch.length} emails to ${trashFolder}`);
           deleted += batch.length;
         } catch (error) {
           console.error(`[BatchDelete] Error deleting batch: ${error instanceof Error ? error.message : 'Unknown'}`);
