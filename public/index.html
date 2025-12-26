@@ -2904,38 +2904,72 @@
         return;
       }
       
-      // Get folders from the folder select in extraction module
-      const folderSelect = document.getElementById('folder');
-      let folders = Array.from(folderSelect.options).map(opt => opt.value);
-      
-      // Filter out virtual parent folders that can't be selected (like [Gmail])
-      // These are folders that have children but can't contain emails themselves
-      const virtualFolders = ['[Gmail]', '[Google Mail]'];
-      folders = folders.filter(f => !virtualFolders.includes(f));
-      
-      if (folders.length === 0) {
-        folderList.innerHTML = '<p style="color:#666; font-size:13px;">没有找到文件夹</p>';
-        return;
-      }
-      
-      emailMgmtState.folders = folders;
-      
-      // Render folder list
-      folderList.innerHTML = folders.map(folder => {
-        const icon = getFolderIcon(folder);
-        const displayName = getFolderDisplayName(folder);
-        const isActive = emailMgmtState.currentFolder === folder;
-        return `
-          <div class="folder-item ${isActive ? 'active' : ''}" onclick="selectEmailFolder('${escapeHtml(folder)}')">
-            <span class="folder-icon">${icon}</span>
-            <span class="folder-name">${escapeHtml(displayName)}</span>
-          </div>
-        `;
-      }).join('');
-      
-      // Auto-select INBOX if no folder selected
-      if (!emailMgmtState.currentFolder && folders.includes('INBOX')) {
-        selectEmailFolder('INBOX');
+      try {
+        // Fetch fresh folder list from server
+        const res = await apiPost('/api/folders', { sessionId });
+        if (!res.ok) throw new Error('Failed to load folders');
+        
+        const data = await res.json();
+        let folders = (data.folders || []).map(f => f.name || f);
+        
+        // Filter out virtual parent folders that can't be selected (like [Gmail])
+        const virtualFolders = ['[Gmail]', '[Google Mail]'];
+        folders = folders.filter(f => !virtualFolders.includes(f));
+        
+        if (folders.length === 0) {
+          folderList.innerHTML = '<p style="color:#666; font-size:13px;">没有找到文件夹</p>';
+          return;
+        }
+        
+        emailMgmtState.folders = folders;
+        
+        // Also update the folder select in extraction module
+        const folderSelect = document.getElementById('folder');
+        if (folderSelect) {
+          const currentValue = folderSelect.value;
+          folderSelect.innerHTML = folders.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('');
+          if (folders.includes(currentValue)) {
+            folderSelect.value = currentValue;
+          }
+        }
+        
+        // Render folder list
+        folderList.innerHTML = folders.map(folder => {
+          const icon = getFolderIcon(folder);
+          const displayName = getFolderDisplayName(folder);
+          const isActive = emailMgmtState.currentFolder === folder;
+          return `
+            <div class="folder-item ${isActive ? 'active' : ''}" onclick="selectEmailFolder('${escapeHtml(folder)}')">
+              <span class="folder-icon">${icon}</span>
+              <span class="folder-name">${escapeHtml(displayName)}</span>
+            </div>
+          `;
+        }).join('');
+        
+        // Auto-select INBOX if no folder selected
+        if (!emailMgmtState.currentFolder && folders.includes('INBOX')) {
+          selectEmailFolder('INBOX');
+        }
+      } catch (e) {
+        console.error('Failed to load folders:', e);
+        // Fallback to folder select options
+        const folderSelect = document.getElementById('folder');
+        let folders = Array.from(folderSelect.options).map(opt => opt.value);
+        const virtualFolders = ['[Gmail]', '[Google Mail]'];
+        folders = folders.filter(f => !virtualFolders.includes(f));
+        
+        emailMgmtState.folders = folders;
+        folderList.innerHTML = folders.map(folder => {
+          const icon = getFolderIcon(folder);
+          const displayName = getFolderDisplayName(folder);
+          const isActive = emailMgmtState.currentFolder === folder;
+          return `
+            <div class="folder-item ${isActive ? 'active' : ''}" onclick="selectEmailFolder('${escapeHtml(folder)}')">
+              <span class="folder-icon">${icon}</span>
+              <span class="folder-name">${escapeHtml(displayName)}</span>
+            </div>
+          `;
+        }).join('');
       }
     }
     
