@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output (will be built in container)
+dist/
+
+# Development files
+*.log
+logs/
+.env
+.env.local
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files
+*.test.ts
+*.spec.ts
+coverage/
+
+# Documentation
+*.md
+!README.md
+
+# Kiro
+.kiro/
+
+# OS files
+.DS_Store
+Thumbs.db

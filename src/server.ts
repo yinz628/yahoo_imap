@@ -219,6 +219,32 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
 };
 
 // ============================================
+// Health Check and System Endpoints
+// ============================================
+
+// GET /health - Health check endpoint for Docker
+app.get('/health', (req: Request, res: Response) => {
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    version: '1.0.0'
+  });
+});
+
+// GET /api/status - Detailed system status
+app.get('/api/status', (req: Request, res: Response) => {
+  res.json({
+    status: 'running',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    version: '1.0.0',
+    node_version: process.version
+  });
+});
+
+// ============================================
 // Authentication API Endpoints
 // ============================================
 
