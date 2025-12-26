@@ -1804,8 +1804,11 @@
             <!-- Email Management Layout -->
             <div style="display:flex; gap:20px;">
               <!-- Folder Sidebar -->
-              <div class="card" style="width:200px; flex-shrink:0;">
-                <h2 style="font-size:16px;">📁 文件夹</h2>
+              <div class="card" style="width:220px; flex-shrink:0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                  <h2 style="font-size:16px; margin:0;">📁 文件夹</h2>
+                  <button onclick="showFolderManager()" class="btn-secondary" style="padding:4px 8px; font-size:12px;">⚙️ 管理</button>
+                </div>
                 <div id="emailFolderList" style="margin-top:10px;">
                   <p style="color:#666; font-size:13px;">加载中...</p>
                 </div>
@@ -1831,6 +1834,7 @@
                     <label for="selectAllEmails" style="margin:0; font-size:13px; cursor:pointer;">全选</label>
                   </div>
                   <button class="btn-danger" onclick="batchDeleteSelectedEmails()" id="btnBatchDelete" disabled>🗑️ 删除选中 (<span id="selectedCount">0</span>)</button>
+                  <button class="btn-secondary" onclick="showMoveEmailsModal()" id="btnMoveEmails" disabled>📂 移动选中</button>
                   <button class="btn-secondary" onclick="refreshEmailList()">🔄 刷新</button>
                   <div style="display:flex; align-items:center; gap:5px; margin-left:10px;">
                     <label style="margin:0; font-size:13px;">排序:</label>
@@ -2056,6 +2060,80 @@
       <div class="pattern-builder-actions">
         <button onclick="closePatternBuilder()" class="btn-secondary">取消</button>
         <button onclick="applyBuiltPattern()" style="background:#28a745; color:white;">✓ 应用规则</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Folder Manager Modal -->
+  <div class="email-modal-overlay" id="folderManagerModal" onclick="closeFolderManager(event)">
+    <div class="email-modal" style="max-width:500px;" onclick="event.stopPropagation()">
+      <div class="email-modal-header">
+        <h3>📁 文件夹管理</h3>
+        <button class="email-modal-close" onclick="closeFolderManager()">&times;</button>
+      </div>
+      <div class="email-modal-body" style="padding:20px;">
+        <!-- Create Folder -->
+        <div style="margin-bottom:20px;">
+          <h4 style="margin-bottom:10px; color:#333;">➕ 新建文件夹</h4>
+          <div style="display:flex; gap:10px;">
+            <input type="text" id="newFolderName" placeholder="输入文件夹名称" style="flex:1;">
+            <button onclick="createFolder()" style="white-space:nowrap;">创建</button>
+          </div>
+        </div>
+        
+        <!-- Folder List -->
+        <div>
+          <h4 style="margin-bottom:10px; color:#333;">📂 现有文件夹</h4>
+          <div id="folderManagerList" style="max-height:300px; overflow-y:auto;">
+            <div style="text-align:center; color:#999; padding:20px;">加载中...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Move Emails Modal -->
+  <div class="email-modal-overlay" id="moveEmailsModal" onclick="closeMoveEmailsModal(event)">
+    <div class="email-modal" style="max-width:400px;" onclick="event.stopPropagation()">
+      <div class="email-modal-header">
+        <h3>📂 移动邮件</h3>
+        <button class="email-modal-close" onclick="closeMoveEmailsModal()">&times;</button>
+      </div>
+      <div class="email-modal-body" style="padding:20px;">
+        <p style="margin-bottom:15px; color:#666;">
+          将 <strong id="moveEmailCount">0</strong> 封选中的邮件移动到:
+        </p>
+        <select id="moveTargetFolder" style="width:100%; padding:10px; margin-bottom:20px;">
+          <option value="">-- 选择目标文件夹 --</option>
+        </select>
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+          <button onclick="closeMoveEmailsModal()" class="btn-secondary">取消</button>
+          <button onclick="moveSelectedEmails()" id="btnConfirmMove">确认移动</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rename Folder Modal -->
+  <div class="email-modal-overlay" id="renameFolderModal" onclick="closeRenameFolderModal(event)">
+    <div class="email-modal" style="max-width:400px;" onclick="event.stopPropagation()">
+      <div class="email-modal-header">
+        <h3>✏️ 重命名文件夹</h3>
+        <button class="email-modal-close" onclick="closeRenameFolderModal()">&times;</button>
+      </div>
+      <div class="email-modal-body" style="padding:20px;">
+        <p style="margin-bottom:10px; color:#666;">
+          原名称: <strong id="oldFolderNameDisplay"></strong>
+        </p>
+        <input type="hidden" id="oldFolderName">
+        <div style="margin-bottom:20px;">
+          <label style="display:block; margin-bottom:5px;">新名称:</label>
+          <input type="text" id="newFolderNameInput" placeholder="输入新名称" style="width:100%;">
+        </div>
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+          <button onclick="closeRenameFolderModal()" class="btn-secondary">取消</button>
+          <button onclick="confirmRenameFolder()">确认重命名</button>
+        </div>
       </div>
     </div>
   </div>
@@ -3049,6 +3127,7 @@
       const count = emailMgmtState.selectedUids.size;
       document.getElementById('selectedCount').textContent = count;
       document.getElementById('btnBatchDelete').disabled = count === 0;
+      document.getElementById('btnMoveEmails').disabled = count === 0;
     }
     
     // Update pagination UI
@@ -3177,6 +3256,291 @@
         }, 3000);
       } catch (e) {
         statusEl.textContent = `❌ 删除失败: ${e.message}`;
+      }
+    }
+    
+    // ==================== Folder Management Functions ====================
+    
+    // System folders that cannot be deleted or renamed
+    const PROTECTED_FOLDERS = [
+      'INBOX', 'Inbox', 'inbox',
+      'Sent', 'SENT', 'Sent Messages', 'Sent Mail',
+      'Drafts', 'DRAFTS', 'Draft',
+      'Trash', 'TRASH', 'Deleted', 'Deleted Messages', 'Deleted Items',
+      'Spam', 'SPAM', 'Junk', 'Bulk', 'Bulk Mail',
+      'Archive', 'ARCHIVE', 'Archives',
+      '[Gmail]', '[Gmail]/All Mail', '[Gmail]/Drafts', '[Gmail]/Important',
+      '[Gmail]/Sent Mail', '[Gmail]/Spam', '[Gmail]/Starred', '[Gmail]/Trash'
+    ];
+    
+    function isProtectedFolder(folderName) {
+      const normalized = folderName.toLowerCase();
+      return PROTECTED_FOLDERS.some(f => f.toLowerCase() === normalized || 
+        normalized.startsWith('[gmail]'));
+    }
+    
+    // Show folder manager modal
+    async function showFolderManager() {
+      const modal = document.getElementById('folderManagerModal');
+      modal.classList.add('visible');
+      document.getElementById('newFolderName').value = '';
+      await loadFolderManagerList();
+    }
+    
+    // Close folder manager modal
+    function closeFolderManager(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('folderManagerModal').classList.remove('visible');
+    }
+    
+    // Load folder list for manager
+    async function loadFolderManagerList() {
+      const listEl = document.getElementById('folderManagerList');
+      listEl.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">加载中...</div>';
+      
+      try {
+        const res = await apiPost('/api/folders', { sessionId });
+        if (!res.ok) throw new Error('Failed to load folders');
+        
+        const data = await res.json();
+        const folders = data.folders || [];
+        
+        if (folders.length === 0) {
+          listEl.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">没有文件夹</div>';
+          return;
+        }
+        
+        let html = '';
+        folders.forEach(folder => {
+          const isProtected = isProtectedFolder(folder.name);
+          const displayName = folder.displayName || folder.name;
+          
+          html += `
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:10px; border:1px solid #e0e0e0; border-radius:4px; margin-bottom:8px; background:${isProtected ? '#f9f9f9' : 'white'};">
+              <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
+                <span style="font-size:16px;">📁</span>
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(folder.name)}">${escapeHtml(displayName)}</span>
+                ${isProtected ? '<span style="font-size:10px; background:#e0e0e0; padding:2px 6px; border-radius:10px; color:#666;">系统</span>' : ''}
+              </div>
+              <div style="display:flex; gap:6px; flex-shrink:0;">
+                ${!isProtected ? `
+                  <button onclick="showRenameFolderModal('${escapeHtml(folder.name)}')" style="padding:4px 8px; font-size:12px; background:#17a2b8;">✏️</button>
+                  <button onclick="deleteFolder('${escapeHtml(folder.name)}')" class="btn-danger" style="padding:4px 8px; font-size:12px;">🗑️</button>
+                ` : ''}
+              </div>
+            </div>
+          `;
+        });
+        
+        listEl.innerHTML = html;
+      } catch (e) {
+        listEl.innerHTML = `<div style="text-align:center; color:#dc3545; padding:20px;">加载失败: ${e.message}</div>`;
+      }
+    }
+    
+    // Create new folder
+    async function createFolder() {
+      const nameInput = document.getElementById('newFolderName');
+      const folderName = nameInput.value.trim();
+      
+      if (!folderName) {
+        alert('请输入文件夹名称');
+        return;
+      }
+      
+      try {
+        const res = await apiPost('/api/folders/create', { sessionId, folderName });
+        const data = await res.json();
+        
+        if (data.error) {
+          alert('创建失败: ' + data.error);
+          return;
+        }
+        
+        nameInput.value = '';
+        await loadFolderManagerList();
+        await loadEmailFolders(); // Refresh sidebar folder list
+        alert('✅ 文件夹创建成功');
+      } catch (e) {
+        alert('创建失败: ' + e.message);
+      }
+    }
+    
+    // Delete folder
+    async function deleteFolder(folderName) {
+      if (isProtectedFolder(folderName)) {
+        alert('系统文件夹不能删除');
+        return;
+      }
+      
+      if (!confirm(`确定要删除文件夹 "${folderName}" 吗？\n\n⚠️ 文件夹中的邮件也会被删除！`)) {
+        return;
+      }
+      
+      try {
+        const res = await apiPost('/api/folders/delete', { sessionId, folderName });
+        const data = await res.json();
+        
+        if (data.error) {
+          alert('删除失败: ' + data.error);
+          return;
+        }
+        
+        await loadFolderManagerList();
+        await loadEmailFolders(); // Refresh sidebar folder list
+        alert('✅ 文件夹删除成功');
+      } catch (e) {
+        alert('删除失败: ' + e.message);
+      }
+    }
+    
+    // Show rename folder modal
+    function showRenameFolderModal(folderName) {
+      document.getElementById('oldFolderName').value = folderName;
+      document.getElementById('oldFolderNameDisplay').textContent = folderName;
+      document.getElementById('newFolderNameInput').value = '';
+      document.getElementById('renameFolderModal').classList.add('visible');
+    }
+    
+    // Close rename folder modal
+    function closeRenameFolderModal(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('renameFolderModal').classList.remove('visible');
+    }
+    
+    // Confirm rename folder
+    async function confirmRenameFolder() {
+      const oldName = document.getElementById('oldFolderName').value;
+      const newName = document.getElementById('newFolderNameInput').value.trim();
+      
+      if (!newName) {
+        alert('请输入新名称');
+        return;
+      }
+      
+      if (oldName === newName) {
+        alert('新名称与原名称相同');
+        return;
+      }
+      
+      try {
+        const res = await apiPost('/api/folders/rename', { sessionId, oldName, newName });
+        const data = await res.json();
+        
+        if (data.error) {
+          alert('重命名失败: ' + data.error);
+          return;
+        }
+        
+        closeRenameFolderModal();
+        await loadFolderManagerList();
+        await loadEmailFolders(); // Refresh sidebar folder list
+        alert('✅ 文件夹重命名成功');
+      } catch (e) {
+        alert('重命名失败: ' + e.message);
+      }
+    }
+    
+    // ==================== Move Emails Functions ====================
+    
+    // Show move emails modal
+    async function showMoveEmailsModal() {
+      const count = emailMgmtState.selectedUids.size;
+      if (count === 0) {
+        alert('请先选择要移动的邮件');
+        return;
+      }
+      
+      document.getElementById('moveEmailCount').textContent = count;
+      
+      // Load folder options
+      const selectEl = document.getElementById('moveTargetFolder');
+      selectEl.innerHTML = '<option value="">-- 加载中... --</option>';
+      
+      document.getElementById('moveEmailsModal').classList.add('visible');
+      
+      try {
+        const res = await apiPost('/api/folders', { sessionId });
+        if (!res.ok) throw new Error('Failed to load folders');
+        
+        const data = await res.json();
+        const folders = data.folders || [];
+        
+        let html = '<option value="">-- 选择目标文件夹 --</option>';
+        folders.forEach(folder => {
+          // Skip current folder and [Gmail] virtual folder
+          if (folder.name === emailMgmtState.currentFolder || folder.name === '[Gmail]') return;
+          const displayName = folder.displayName || folder.name;
+          html += `<option value="${escapeHtml(folder.name)}">${escapeHtml(displayName)}</option>`;
+        });
+        
+        selectEl.innerHTML = html;
+      } catch (e) {
+        selectEl.innerHTML = '<option value="">-- 加载失败 --</option>';
+      }
+    }
+    
+    // Close move emails modal
+    function closeMoveEmailsModal(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('moveEmailsModal').classList.remove('visible');
+    }
+    
+    // Move selected emails to target folder
+    async function moveSelectedEmails() {
+      const targetFolder = document.getElementById('moveTargetFolder').value;
+      if (!targetFolder) {
+        alert('请选择目标文件夹');
+        return;
+      }
+      
+      const uids = Array.from(emailMgmtState.selectedUids);
+      if (uids.length === 0) {
+        alert('没有选中的邮件');
+        return;
+      }
+      
+      const btnConfirm = document.getElementById('btnConfirmMove');
+      btnConfirm.disabled = true;
+      btnConfirm.textContent = '移动中...';
+      
+      try {
+        const res = await apiPost('/api/emails/move', {
+          sessionId,
+          sourceFolder: emailMgmtState.currentFolder,
+          targetFolder,
+          uids
+        });
+        
+        const data = await res.json();
+        
+        if (data.error) {
+          alert('移动失败: ' + data.error);
+          return;
+        }
+        
+        closeMoveEmailsModal();
+        
+        // Clear selection and refresh
+        emailMgmtState.selectedUids.clear();
+        document.getElementById('selectAllEmails').checked = false;
+        updateSelectedCount();
+        
+        await loadEmailList();
+        
+        const statusEl = document.getElementById('emailListStatus');
+        statusEl.textContent = `✅ ${data.message}`;
+        
+        setTimeout(() => {
+          if (statusEl.textContent.includes('成功') || statusEl.textContent.includes('移动')) {
+            statusEl.textContent = `共 ${emailMgmtState.pagination.totalCount} 封邮件`;
+          }
+        }, 3000);
+      } catch (e) {
+        alert('移动失败: ' + e.message);
+      } finally {
+        btnConfirm.disabled = false;
+        btnConfirm.textContent = '确认移动';
       }
     }
     

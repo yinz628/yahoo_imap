@@ -1526,6 +1526,220 @@ app.post('/api/emails/batch-delete', async (req, res) => {
   }
 });
 
+// ============================================
+// Folder Management API Endpoints
+// ============================================
+
+/**
+ * POST /api/folders/create - Create a new folder
+ */
+app.post('/api/folders/create', async (req, res) => {
+  const { sessionId, folderName } = req.body;
+  const session = await ensureSessionConnected(sessionId);
+  
+  if (!session) {
+    return res.status(400).json({ error: 'Not connected' });
+  }
+
+  if (!folderName || typeof folderName !== 'string' || folderName.trim() === '') {
+    return res.status(400).json({ error: 'Folder name is required' });
+  }
+
+  try {
+    const connection = session.connection;
+    const cleanName = folderName.trim();
+    
+    console.log(`[FolderCreate] Creating folder: ${cleanName}`);
+    
+    await connection.mailboxCreate(cleanName);
+    
+    // Refresh folder list
+    const folders = await connection.list();
+    const folderPaths = folders.map((f: { path: string }) => f.path);
+    
+    console.log(`[FolderCreate] Folder created successfully`);
+    
+    res.json({
+      success: true,
+      message: `文件夹 "${cleanName}" 创建成功`,
+      folders: folderPaths
+    });
+  } catch (error) {
+    console.error('[FolderCreate] Error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    if (message.includes('ALREADYEXISTS') || message.includes('already exists')) {
+      res.status(400).json({ error: '文件夹已存在' });
+    } else {
+      res.status(500).json({ error: message });
+    }
+  }
+});
+
+/**
+ * POST /api/folders/delete - Delete a folder
+ */
+app.post('/api/folders/delete', async (req, res) => {
+  const { sessionId, folderName } = req.body;
+  const session = await ensureSessionConnected(sessionId);
+  
+  if (!session) {
+    return res.status(400).json({ error: 'Not connected' });
+  }
+
+  if (!folderName || typeof folderName !== 'string') {
+    return res.status(400).json({ error: 'Folder name is required' });
+  }
+
+  // Prevent deletion of system folders
+  const protectedFolders = ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam', 'Junk', 'Bulk', 
+    '[Gmail]', '[Gmail]/All Mail', '[Gmail]/Drafts', '[Gmail]/Sent Mail', '[Gmail]/Spam', '[Gmail]/Starred', '[Gmail]/Trash'];
+  
+  if (protectedFolders.some(f => folderName.toLowerCase() === f.toLowerCase())) {
+    return res.status(400).json({ error: '无法删除系统文件夹' });
+  }
+
+  try {
+    const connection = session.connection;
+    
+    console.log(`[FolderDelete] Deleting folder: ${folderName}`);
+    
+    await connection.mailboxDelete(folderName);
+    
+    // Refresh folder list
+    const folders = await connection.list();
+    const folderPaths = folders.map((f: { path: string }) => f.path);
+    
+    console.log(`[FolderDelete] Folder deleted successfully`);
+    
+    res.json({
+      success: true,
+      message: `文件夹 "${folderName}" 删除成功`,
+      folders: folderPaths
+    });
+  } catch (error) {
+    console.error('[FolderDelete] Error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    if (message.includes('NONEXISTENT') || message.includes('not exist')) {
+      res.status(400).json({ error: '文件夹不存在' });
+    } else {
+      res.status(500).json({ error: message });
+    }
+  }
+});
+
+/**
+ * POST /api/folders/rename - Rename a folder
+ */
+app.post('/api/folders/rename', async (req, res) => {
+  const { sessionId, oldName, newName } = req.body;
+  const session = await ensureSessionConnected(sessionId);
+  
+  if (!session) {
+    return res.status(400).json({ error: 'Not connected' });
+  }
+
+  if (!oldName || !newName || typeof oldName !== 'string' || typeof newName !== 'string') {
+    return res.status(400).json({ error: 'Old and new folder names are required' });
+  }
+
+  // Prevent renaming of system folders
+  const protectedFolders = ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam', 'Junk', 'Bulk',
+    '[Gmail]', '[Gmail]/All Mail', '[Gmail]/Drafts', '[Gmail]/Sent Mail', '[Gmail]/Spam', '[Gmail]/Starred', '[Gmail]/Trash'];
+  
+  if (protectedFolders.some(f => oldName.toLowerCase() === f.toLowerCase())) {
+    return res.status(400).json({ error: '无法重命名系统文件夹' });
+  }
+
+  try {
+    const connection = session.connection;
+    const cleanNewName = newName.trim();
+    
+    console.log(`[FolderRename] Renaming folder: ${oldName} -> ${cleanNewName}`);
+    
+    await connection.mailboxRename(oldName, cleanNewName);
+    
+    // Refresh folder list
+    const folders = await connection.list();
+    const folderPaths = folders.map((f: { path: string }) => f.path);
+    
+    console.log(`[FolderRename] Folder renamed successfully`);
+    
+    res.json({
+      success: true,
+      message: `文件夹已重命名为 "${cleanNewName}"`,
+      folders: folderPaths
+    });
+  } catch (error) {
+    console.error('[FolderRename] Error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * POST /api/emails/move - Move emails to a different folder
+ */
+app.post('/api/emails/move', async (req, res) => {
+  const { sessionId, sourceFolder = 'INBOX', targetFolder, uids } = req.body;
+  const session = await ensureSessionConnected(sessionId);
+  
+  if (!session) {
+    return res.status(400).json({ error: 'Not connected' });
+  }
+
+  if (!targetFolder || typeof targetFolder !== 'string') {
+    return res.status(400).json({ error: 'Target folder is required' });
+  }
+
+  if (!uids || !Array.isArray(uids) || uids.length === 0) {
+    return res.status(400).json({ error: 'UIDs array is required' });
+  }
+
+  try {
+    console.log(`[EmailMove] Moving ${uids.length} emails from ${sourceFolder} to ${targetFolder}`);
+    
+    const connection = session.connection;
+    
+    // Open source mailbox in write mode
+    await connection.mailboxOpen(sourceFolder, { readOnly: false });
+    
+    let moved = 0;
+    let errors = 0;
+    
+    try {
+      // Process in batches of 50 to avoid timeout
+      const batchSize = 50;
+      for (let i = 0; i < uids.length; i += batchSize) {
+        const batch = uids.slice(i, i + batchSize);
+        const range = batch.join(',');
+        
+        try {
+          await connection.messageMove(range, targetFolder, { uid: true });
+          moved += batch.length;
+          console.log(`[EmailMove] Moved batch of ${batch.length} emails`);
+        } catch (error) {
+          console.error(`[EmailMove] Error moving batch: ${error instanceof Error ? error.message : 'Unknown'}`);
+          errors += batch.length;
+        }
+      }
+    } finally {
+      await connection.mailboxClose();
+    }
+    
+    console.log(`[EmailMove] Moved ${moved} emails, ${errors} errors`);
+    
+    res.json({
+      success: true,
+      moved,
+      errors,
+      message: `成功移动 ${moved} 封邮件${errors > 0 ? `，${errors} 封失败` : ''}`
+    });
+  } catch (error) {
+    console.error('[EmailMove] Error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+});
+
 /**
  * POST /api/emails/content - Get email content by UID
  * Returns the full email body content
