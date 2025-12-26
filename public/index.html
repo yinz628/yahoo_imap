@@ -152,6 +152,12 @@
     label { display: block; margin-bottom: 5px; color: #555; font-weight: 500; }
     input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
     input:focus, select:focus, textarea:focus { outline: none; border-color: #6001d2; }
+    
+    /* Settings checkbox style */
+    .settings-checkbox { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; cursor: pointer; }
+    .settings-checkbox input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; cursor: pointer; }
+    .settings-checkbox span { font-size: 14px; color: #333; }
+    
     .row { display: flex; gap: 15px; }
     .row .form-group { flex: 1; }
     
@@ -1917,25 +1923,19 @@
             <h2>📥 导入数据</h2>
             <p style="color:#666; font-size:13px; margin-bottom:15px;">从备份文件恢复您的邮箱配置和提取规则。</p>
             
-            <div style="margin-bottom:15px;">
-              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                <input type="checkbox" id="importMergeMode" checked>
-                <span style="font-size:13px;">合并模式（跳过已存在的数据）</span>
-              </label>
+            <div class="settings-checkbox">
+              <input type="checkbox" id="importMergeMode" checked>
+              <span>合并模式（跳过已存在的数据）</span>
             </div>
             
-            <div style="margin-bottom:15px;">
-              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                <input type="checkbox" id="importMailboxes" checked>
-                <span style="font-size:13px;">导入邮箱配置</span>
-              </label>
+            <div class="settings-checkbox">
+              <input type="checkbox" id="importMailboxes" checked>
+              <span>导入邮箱配置</span>
             </div>
             
-            <div style="margin-bottom:15px;">
-              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                <input type="checkbox" id="importPatterns" checked>
-                <span style="font-size:13px;">导入提取规则</span>
-              </label>
+            <div class="settings-checkbox">
+              <input type="checkbox" id="importPatterns" checked>
+              <span>导入提取规则</span>
             </div>
             
             <input type="file" id="importFileInput" accept=".json" style="display:none;" onchange="handleImportFile(event)">
@@ -1952,18 +1952,14 @@
               <p style="color:#e65100; margin:0; font-size:13px;">⚠️ 警告：此操作不可撤销！建议先导出备份。</p>
             </div>
             
-            <div style="margin-bottom:15px;">
-              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                <input type="checkbox" id="clearMailboxes">
-                <span style="font-size:13px;">清除所有邮箱配置</span>
-              </label>
+            <div class="settings-checkbox">
+              <input type="checkbox" id="clearMailboxes">
+              <span>清除所有邮箱配置</span>
             </div>
             
-            <div style="margin-bottom:15px;">
-              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                <input type="checkbox" id="clearPatterns">
-                <span style="font-size:13px;">清除所有提取规则</span>
-              </label>
+            <div class="settings-checkbox">
+              <input type="checkbox" id="clearPatterns">
+              <span>清除所有提取规则</span>
             </div>
             
             <button onclick="clearUserData()" class="btn-danger" style="padding:10px 20px;">
