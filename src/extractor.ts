@@ -56,8 +56,14 @@ export class RegexExtractor {
       // For global flag, iterate through all matches
       if (regex.global) {
         let matchCount = 0;
+        const seenMatches = new Set<string>(); // Track unique matches
         while ((match = regex.exec(safeContent)) !== null && matchCount < maxMatches) {
-          matches.push(this.createExtractionMatch(match));
+          const fullMatch = match[0];
+          // Only add if not seen before (deduplicate)
+          if (!seenMatches.has(fullMatch)) {
+            seenMatches.add(fullMatch);
+            matches.push(this.createExtractionMatch(match));
+          }
           matchCount++;
           
           // Prevent infinite loop for zero-length matches

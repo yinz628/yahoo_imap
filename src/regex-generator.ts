@@ -376,6 +376,7 @@ export function testRegexMatch(pattern: string, flags: string, content: string):
   
   const matches: string[] = [];
   const positions: number[] = [];
+  const seenMatches = new Set<string>(); // Track unique matches
   
   try {
     // Ensure global flag for finding all matches
@@ -387,8 +388,13 @@ export function testRegexMatch(pattern: string, flags: string, content: string):
     let count = 0;
     
     while ((match = regex.exec(content)) !== null && count < maxMatches) {
-      matches.push(match[0]);
-      positions.push(match.index);
+      const fullMatch = match[0];
+      // Only add if not seen before (deduplicate)
+      if (!seenMatches.has(fullMatch)) {
+        seenMatches.add(fullMatch);
+        matches.push(fullMatch);
+        positions.push(match.index);
+      }
       count++;
       
       // Prevent infinite loop for zero-length matches

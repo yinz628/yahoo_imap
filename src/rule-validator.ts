@@ -205,10 +205,16 @@ export function testRegexMatch(pattern: string, flags: string, content: string):
     let match: RegExpExecArray | null;
     const maxMatches = 1000; // Safety limit to prevent infinite loops
     let count = 0;
+    const seenMatches = new Set<string>(); // Track unique matches
 
     while ((match = regex.exec(content)) !== null && count < maxMatches) {
-      result.matches.push(match[0]);
-      result.positions.push(match.index);
+      const fullMatch = match[0];
+      // Only add if not seen before (deduplicate)
+      if (!seenMatches.has(fullMatch)) {
+        seenMatches.add(fullMatch);
+        result.matches.push(fullMatch);
+        result.positions.push(match.index);
+      }
       count++;
 
       // Prevent infinite loop for zero-length matches
