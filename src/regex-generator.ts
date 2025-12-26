@@ -386,12 +386,15 @@ export function testRegexMatch(pattern: string, flags: string, content: string):
     let match: RegExpExecArray | null;
     const maxMatches = 1000; // Safety limit
     let count = 0;
+    const caseInsensitive = flags.includes('i');
     
     while ((match = regex.exec(content)) !== null && count < maxMatches) {
       const fullMatch = match[0];
+      const matchKey = caseInsensitive ? fullMatch.toLowerCase() : fullMatch;
+      
       // Only add if not seen before (deduplicate)
-      if (!seenMatches.has(fullMatch)) {
-        seenMatches.add(fullMatch);
+      if (!seenMatches.has(matchKey)) {
+        seenMatches.add(matchKey);
         matches.push(fullMatch);
         positions.push(match.index);
       }

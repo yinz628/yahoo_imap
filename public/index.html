@@ -4391,13 +4391,14 @@
                 document.getElementById('progressText').textContent = `${data.processed} / ${totalEmails}`;
                 
                 if (data.matches && data.matches.length > 0) {
-                  // Deduplicate matches
+                  // Deduplicate matches (case-insensitive)
                   const seenInBatch = new Set();
                   const uniqueMatches = data.matches.filter(match => {
-                    if (seenInBatch.has(match.fullMatch)) {
+                    const key = match.fullMatch.toLowerCase();
+                    if (seenInBatch.has(key)) {
                       return false;
                     }
-                    seenInBatch.add(match.fullMatch);
+                    seenInBatch.add(key);
                     return true;
                   });
                   
@@ -4466,13 +4467,14 @@
       results.forEach(r => {
         if (r.matches.length === 0) return;
         
-        // Deduplicate matches by fullMatch value
+        // Deduplicate matches by fullMatch value (case-insensitive)
         const seenMatches = new Set();
         const uniqueMatches = r.matches.filter(m => {
-          if (seenMatches.has(m.fullMatch)) {
+          const key = m.fullMatch.toLowerCase();
+          if (seenMatches.has(key)) {
             return false;
           }
-          seenMatches.add(m.fullMatch);
+          seenMatches.add(key);
           return true;
         });
         
@@ -4506,13 +4508,14 @@
       let csv = 'Date,From,Subject,Match,' + groups.join(',') + '\n';
       
       extractedResults.forEach(r => {
-        // Deduplicate matches by fullMatch value
+        // Deduplicate matches by fullMatch value (case-insensitive)
         const seenMatches = new Set();
         const uniqueMatches = r.matches.filter(m => {
-          if (seenMatches.has(m.fullMatch)) {
+          const key = m.fullMatch.toLowerCase();
+          if (seenMatches.has(key)) {
             return false;
           }
-          seenMatches.add(m.fullMatch);
+          seenMatches.add(key);
           return true;
         });
         

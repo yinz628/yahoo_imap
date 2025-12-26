@@ -57,11 +57,16 @@ export class RegexExtractor {
       if (regex.global) {
         let matchCount = 0;
         const seenMatches = new Set<string>(); // Track unique matches
+        const caseInsensitive = pattern.flags?.includes('i') || false;
+        
         while ((match = regex.exec(safeContent)) !== null && matchCount < maxMatches) {
           const fullMatch = match[0];
+          // Use lowercase for comparison if case-insensitive flag is set
+          const matchKey = caseInsensitive ? fullMatch.toLowerCase() : fullMatch;
+          
           // Only add if not seen before (deduplicate)
-          if (!seenMatches.has(fullMatch)) {
-            seenMatches.add(fullMatch);
+          if (!seenMatches.has(matchKey)) {
+            seenMatches.add(matchKey);
             matches.push(this.createExtractionMatch(match));
           }
           matchCount++;

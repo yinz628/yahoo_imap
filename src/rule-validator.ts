@@ -206,12 +206,15 @@ export function testRegexMatch(pattern: string, flags: string, content: string):
     const maxMatches = 1000; // Safety limit to prevent infinite loops
     let count = 0;
     const seenMatches = new Set<string>(); // Track unique matches
+    const caseInsensitive = flags.includes('i');
 
     while ((match = regex.exec(content)) !== null && count < maxMatches) {
       const fullMatch = match[0];
+      const matchKey = caseInsensitive ? fullMatch.toLowerCase() : fullMatch;
+      
       // Only add if not seen before (deduplicate)
-      if (!seenMatches.has(fullMatch)) {
-        seenMatches.add(fullMatch);
+      if (!seenMatches.has(matchKey)) {
+        seenMatches.add(matchKey);
         result.matches.push(fullMatch);
         result.positions.push(match.index);
       }
