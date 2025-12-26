@@ -1450,6 +1450,10 @@
             <span class="nav-icon">📧</span>
             <span>邮件管理</span>
           </div>
+          <div class="nav-item" data-module="settings" onclick="switchModule('settings')">
+            <span class="nav-icon">⚙️</span>
+            <span>数据管理</span>
+          </div>
         </div>
         <div class="sidebar-footer">
           <div class="sidebar-user">
@@ -1894,6 +1898,80 @@
             </div>
           </div>
         </div>
+
+        <!-- Module 4: Settings / Data Management -->
+        <div class="feature-module" id="module-settings">
+          <h1 style="color:#6001d2; margin-bottom:20px;">⚙️ 数据管理</h1>
+          
+          <!-- Export Data Card -->
+          <div class="card">
+            <h2>📤 导出数据</h2>
+            <p style="color:#666; font-size:13px; margin-bottom:15px;">导出您的邮箱配置和提取规则，可用于备份或迁移到其他设备。</p>
+            <button onclick="exportUserData()" style="background:#28a745; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">
+              📥 下载数据备份
+            </button>
+          </div>
+          
+          <!-- Import Data Card -->
+          <div class="card" style="margin-top:20px;">
+            <h2>📥 导入数据</h2>
+            <p style="color:#666; font-size:13px; margin-bottom:15px;">从备份文件恢复您的邮箱配置和提取规则。</p>
+            
+            <div style="margin-bottom:15px;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="importMergeMode" checked>
+                <span style="font-size:13px;">合并模式（跳过已存在的数据）</span>
+              </label>
+            </div>
+            
+            <div style="margin-bottom:15px;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="importMailboxes" checked>
+                <span style="font-size:13px;">导入邮箱配置</span>
+              </label>
+            </div>
+            
+            <div style="margin-bottom:15px;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="importPatterns" checked>
+                <span style="font-size:13px;">导入提取规则</span>
+              </label>
+            </div>
+            
+            <input type="file" id="importFileInput" accept=".json" style="display:none;" onchange="handleImportFile(event)">
+            <button onclick="document.getElementById('importFileInput').click()" style="background:#007bff; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">
+              📂 选择备份文件
+            </button>
+            <div id="importResult" style="margin-top:15px;"></div>
+          </div>
+          
+          <!-- Clear Data Card -->
+          <div class="card" style="margin-top:20px;">
+            <h2>🗑️ 清除数据</h2>
+            <div style="background:#fff3e0; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #ffcc80;">
+              <p style="color:#e65100; margin:0; font-size:13px;">⚠️ 警告：此操作不可撤销！建议先导出备份。</p>
+            </div>
+            
+            <div style="margin-bottom:15px;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="clearMailboxes">
+                <span style="font-size:13px;">清除所有邮箱配置</span>
+              </label>
+            </div>
+            
+            <div style="margin-bottom:15px;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="clearPatterns">
+                <span style="font-size:13px;">清除所有提取规则</span>
+              </label>
+            </div>
+            
+            <button onclick="clearUserData()" class="btn-danger" style="padding:10px 20px;">
+              🗑️ 清除选中的数据
+            </button>
+            <div id="clearResult" style="margin-top:15px;"></div>
+          </div>
+        </div>
       </main>
     </div>
   </div>
@@ -2059,8 +2137,12 @@
     /**
      * Convenience method for DELETE requests with auth
      */
-    async function apiDelete(endpoint) {
-      return apiRequest(endpoint, { method: 'DELETE' });
+    async function apiDelete(endpoint, body = null) {
+      const options = { method: 'DELETE' };
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+      return apiRequest(endpoint, options);
     }
     
     /**
@@ -2146,6 +2228,132 @@
       } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = '登录';
+      }
+    }
+
+    // ==================== User Data Export/Import Functions ====================
+    
+    // Export user data
+    async function exportUserData() {
+      try {
+        const res = await apiGet('/api/user/export');
+        if (!res.ok) {
+          throw new Error('导出失败');
+        }
+        
+        const data = await res.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `user-data-${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        alert(`导出成功！\n邮箱: ${data.mailboxes?.length || 0} 个\n规则: ${data.patterns?.length || 0} 个`);
+      } catch (e) {
+        alert('导出失败: ' + e.message);
+      }
+    }
+    
+    // Handle import file selection
+    async function handleImportFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      const resultEl = document.getElementById('importResult');
+      
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        
+        if (!data.mailboxes && !data.patterns) {
+          throw new Error('无效的备份文件格式');
+        }
+        
+        const mergeMode = document.getElementById('importMergeMode').checked;
+        const importMailboxes = document.getElementById('importMailboxes').checked;
+        const importPatterns = document.getElementById('importPatterns').checked;
+        
+        if (!importMailboxes && !importPatterns) {
+          resultEl.innerHTML = '<p style="color:#dc3545;">请至少选择一项要导入的数据</p>';
+          return;
+        }
+        
+        const res = await apiPost('/api/user/import', {
+          data,
+          options: { merge: mergeMode, importMailboxes, importPatterns }
+        });
+        
+        const result = await res.json();
+        
+        if (result.success) {
+          resultEl.innerHTML = `
+            <p style="color:#28a745;">✅ 导入成功！</p>
+            <p style="font-size:13px; color:#666;">
+              邮箱: 导入 ${result.imported.mailboxes} 个，跳过 ${result.skipped.mailboxes} 个<br>
+              规则: 导入 ${result.imported.patterns} 个，跳过 ${result.skipped.patterns} 个
+            </p>
+          `;
+          // Refresh mailbox list if on that module
+          if (document.getElementById('module-mailbox-management').classList.contains('active')) {
+            loadMailboxes();
+          }
+        } else {
+          resultEl.innerHTML = `<p style="color:#dc3545;">❌ 导入失败: ${result.error}</p>`;
+        }
+      } catch (e) {
+        resultEl.innerHTML = `<p style="color:#dc3545;">❌ 导入失败: ${e.message}</p>`;
+      }
+      
+      // Reset file input
+      event.target.value = '';
+    }
+    
+    // Clear user data
+    async function clearUserData() {
+      const clearMailboxes = document.getElementById('clearMailboxes').checked;
+      const clearPatterns = document.getElementById('clearPatterns').checked;
+      
+      if (!clearMailboxes && !clearPatterns) {
+        alert('请至少选择一项要清除的数据');
+        return;
+      }
+      
+      const items = [];
+      if (clearMailboxes) items.push('邮箱配置');
+      if (clearPatterns) items.push('提取规则');
+      
+      if (!confirm(`确定要清除以下数据吗？\n\n${items.join('\n')}\n\n此操作不可撤销！`)) {
+        return;
+      }
+      
+      const resultEl = document.getElementById('clearResult');
+      
+      try {
+        const res = await apiDelete('/api/user/data', { clearMailboxes, clearPatterns });
+        const result = await res.json();
+        
+        if (result.success) {
+          resultEl.innerHTML = `
+            <p style="color:#28a745;">✅ 清除成功！</p>
+            <p style="font-size:13px; color:#666;">
+              邮箱: 清除 ${result.cleared.mailboxes} 个<br>
+              规则: 清除 ${result.cleared.patterns} 个
+            </p>
+          `;
+          // Uncheck boxes
+          document.getElementById('clearMailboxes').checked = false;
+          document.getElementById('clearPatterns').checked = false;
+          // Refresh mailbox list
+          loadMailboxes();
+        } else {
+          resultEl.innerHTML = `<p style="color:#dc3545;">❌ 清除失败: ${result.error}</p>`;
+        }
+      } catch (e) {
+        resultEl.innerHTML = `<p style="color:#dc3545;">❌ 清除失败: ${e.message}</p>`;
       }
     }
 

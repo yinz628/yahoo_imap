@@ -1595,6 +1595,185 @@ app.post('/api/emails/content', async (req, res) => {
   }
 });
 
+// ============================================
+// User Data Export/Import API Endpoints
+// ============================================
+
+// GET /api/user/export - Export all user data (mailboxes + patterns)
+app.get('/api/user/export', authMiddleware, async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  
+  try {
+    const mailboxes = await getMailboxes(userId);
+    const patterns = await getPatterns(userId);
+    
+    // Decrypt passwords for export
+    const exportMailboxes = mailboxes.map(m => ({
+      email: m.email,
+      password: decryptPassword(m.encryptedPassword),
+      provider: m.provider || 'yahoo',
+      addedAt: m.addedAt,
+      lastUsed: m.lastUsed,
+    }));
+    
+    const exportData = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      mailboxes: exportMailboxes,
+      patterns: patterns.map(p => ({
+        patternName: p.patternName,
+        subjectPattern: p.subjectPattern,
+        regexPattern: p.regexPattern,
+        regexFlags: p.regexFlags,
+        tags: p.tags,
+        createdAt: p.createdAt,
+        lastUsed: p.lastUsed,
+      })),
+    };
+    
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename=user-data-${new Date().toISOString().slice(0,10)}.json`);
+    res.json(exportData);
+  } catch (error) {
+    console.error('[Export] Error:', error);
+    res.status(500).json({ error: 'Failed to export user data' });
+  }
+});
+
+// POST /api/user/import - Import user data (mailboxes + patterns)
+app.post('/api/user/import', authMiddleware, async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const { data, options } = req.body;
+  
+  if (!data) {
+    return res.status(400).json({ error: 'No data provided' });
+  }
+  
+  const mergeMode = options?.merge ?? true; // Default: merge with existing
+  const importMailboxes = options?.importMailboxes ?? true;
+  const importPatterns = options?.importPatterns ?? true;
+  
+  try {
+    let mailboxesImported = 0;
+    let patternsImported = 0;
+    let mailboxesSkipped = 0;
+    let patternsSkipped = 0;
+    
+    // Import mailboxes
+    if (importMailboxes && data.mailboxes && Array.isArray(data.mailboxes)) {
+      const existingMailboxes = await getMailboxes(userId);
+      const existingEmails = new Set(existingMailboxes.map(m => m.email.toLowerCase()));
+      
+      for (const mailbox of data.mailboxes) {
+        if (!mailbox.email || !mailbox.password) continue;
+        
+        // Skip if already exists (in merge mode)
+        if (mergeMode && existingEmails.has(mailbox.email.toLowerCase())) {
+          mailboxesSkipped++;
+          continue;
+        }
+        
+        try {
+          await saveMailbox(userId, {
+            email: mailbox.email,
+            password: mailbox.password,
+            provider: mailbox.provider || 'yahoo',
+          });
+          mailboxesImported++;
+        } catch (e) {
+          console.warn(`[Import] Failed to import mailbox ${mailbox.email}:`, e);
+          mailboxesSkipped++;
+        }
+      }
+    }
+    
+    // Import patterns
+    if (importPatterns && data.patterns && Array.isArray(data.patterns)) {
+      const existingPatterns = await getPatterns(userId);
+      const existingRegex = new Set(existingPatterns.map(p => `${p.subjectPattern}|${p.regexPattern}`));
+      
+      for (const pattern of data.patterns) {
+        if (!pattern.regexPattern) continue;
+        
+        const key = `${pattern.subjectPattern || ''}|${pattern.regexPattern}`;
+        
+        // Skip if already exists (in merge mode)
+        if (mergeMode && existingRegex.has(key)) {
+          patternsSkipped++;
+          continue;
+        }
+        
+        try {
+          await savePattern(userId, {
+            patternName: pattern.patternName,
+            subjectPattern: pattern.subjectPattern || '',
+            regexPattern: pattern.regexPattern,
+            regexFlags: pattern.regexFlags || 'g',
+            tags: pattern.tags || [],
+          });
+          patternsImported++;
+        } catch (e) {
+          console.warn(`[Import] Failed to import pattern:`, e);
+          patternsSkipped++;
+        }
+      }
+    }
+    
+    res.json({
+      success: true,
+      imported: {
+        mailboxes: mailboxesImported,
+        patterns: patternsImported,
+      },
+      skipped: {
+        mailboxes: mailboxesSkipped,
+        patterns: patternsSkipped,
+      },
+    });
+  } catch (error) {
+    console.error('[Import] Error:', error);
+    res.status(500).json({ error: 'Failed to import user data' });
+  }
+});
+
+// DELETE /api/user/data - Clear all user data
+app.delete('/api/user/data', authMiddleware, async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  const { clearMailboxes, clearPatterns } = req.body;
+  
+  try {
+    let mailboxesCleared = 0;
+    let patternsCleared = 0;
+    
+    if (clearMailboxes) {
+      const mailboxes = await getMailboxes(userId);
+      for (const mailbox of mailboxes) {
+        await deleteMailbox(userId, mailbox.id);
+        mailboxesCleared++;
+      }
+    }
+    
+    if (clearPatterns) {
+      const patterns = await getPatterns(userId);
+      for (const pattern of patterns) {
+        await deletePattern(userId, pattern.id);
+        patternsCleared++;
+      }
+    }
+    
+    res.json({
+      success: true,
+      cleared: {
+        mailboxes: mailboxesCleared,
+        patterns: patternsCleared,
+      },
+    });
+  } catch (error) {
+    console.error('[ClearData] Error:', error);
+    res.status(500).json({ error: 'Failed to clear user data' });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 
 // Initialize default user and start server
