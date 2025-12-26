@@ -1475,6 +1475,15 @@ app.post('/api/emails/batch-delete', async (req, res) => {
     console.log(`[BatchDelete] Deleting ${uids.length} emails from ${folder}`);
     
     const connection = session.connection;
+    const isGmail = session.provider === 'gmail';
+    
+    // For Gmail, we need to move to Trash folder instead of delete
+    let trashFolder: string | null = null;
+    if (isGmail) {
+      const deleter = new EmailDeleter();
+      trashFolder = await deleter.getTrashFolderName(connection);
+      console.log(`[BatchDelete] Gmail detected, trash folder: ${trashFolder}`);
+    }
     
     // Open the mailbox in write mode
     await connection.mailboxOpen(folder, { readOnly: false });
@@ -1490,8 +1499,14 @@ app.post('/api/emails/batch-delete', async (req, res) => {
         const range = batch.join(',');
         
         try {
-          // Move to Trash (messageDelete moves to Trash by default in Yahoo)
-          await connection.messageDelete(range, { uid: true });
+          if (isGmail && trashFolder) {
+            // Gmail: Move to Trash folder
+            await connection.messageMove(range, trashFolder, { uid: true });
+            console.log(`[BatchDelete] Gmail: Moved ${batch.length} emails to ${trashFolder}`);
+          } else {
+            // Other providers: Use messageDelete (typically moves to Trash)
+            await connection.messageDelete(range, { uid: true });
+          }
           deleted += batch.length;
         } catch (error) {
           console.error(`[BatchDelete] Error deleting batch: ${error instanceof Error ? error.message : 'Unknown'}`);

@@ -326,6 +326,8 @@ export class EmailDeleter {
 
   /**
    * Delete emails by moving them to Trash folder.
+   * For Gmail, uses messageMove to [Gmail]/Trash.
+   * For other providers, uses messageDelete which typically moves to Trash.
    * 
    * @param connection - Active IMAP connection
    * @param filter - Filter criteria for emails to delete
@@ -346,6 +348,12 @@ export class EmailDeleter {
       return { deleted: 0, errors: 0 };
     }
 
+    // Detect if this is Gmail by checking for Gmail-specific folders
+    const trashFolder = await this.getTrashFolderName(connection);
+    const isGmail = trashFolder?.startsWith('[Gmail]') || false;
+    
+    console.log(`[Deleter] Provider detected: ${isGmail ? 'Gmail' : 'Other'}, Trash folder: ${trashFolder}`);
+
     // Open mailbox in write mode
     await connection.mailboxOpen(folder, { readOnly: false });
 
@@ -360,8 +368,14 @@ export class EmailDeleter {
         const range = batch.join(',');
         
         try {
-          // Mark messages as deleted and move to Trash
-          await connection.messageDelete(range, { uid: true });
+          if (isGmail && trashFolder) {
+            // Gmail: Move to Trash folder instead of delete
+            await connection.messageMove(range, trashFolder, { uid: true });
+            console.log(`[Deleter] Gmail: Moved ${batch.length} emails to ${trashFolder}`);
+          } else {
+            // Other providers: Use messageDelete (typically moves to Trash)
+            await connection.messageDelete(range, { uid: true });
+          }
           deleted += batch.length;
           
           if (onProgress) {
