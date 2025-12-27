@@ -1363,7 +1363,14 @@ app.post('/api/emails/search', async (req, res) => {
   }
 
   try {
-    console.log(`[EmailSearch] Searching in ${folder} for subject: ${subjectPattern}, sortOrder: ${sortOrder}`);
+    // Normalize special characters in search pattern
+    // Replace curly quotes with straight quotes, and other special chars
+    let normalizedPattern = subjectPattern
+      .replace(/[\u2018\u2019]/g, "'")  // Replace ' ' with '
+      .replace(/[\u201C\u201D]/g, '"')  // Replace " " with "
+      .replace(/[\u2013\u2014]/g, '-'); // Replace – — with -
+    
+    console.log(`[EmailSearch] Searching in ${folder} for subject: ${normalizedPattern}, sortOrder: ${sortOrder}`);
     
     const connection = session.connection;
     
@@ -1372,7 +1379,7 @@ app.post('/api/emails/search', async (req, res) => {
     
     try {
       // Search by subject
-      const searchCriteria = { subject: subjectPattern };
+      const searchCriteria = { subject: normalizedPattern };
       const matchingUids = await connection.search(searchCriteria, { uid: true });
       
       if (matchingUids === false || matchingUids.length === 0) {
