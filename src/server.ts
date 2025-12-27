@@ -1363,26 +1363,43 @@ app.post('/api/emails/search', async (req, res) => {
   }
 
   try {
-    // Normalize special characters in search pattern
-    // Replace curly quotes with straight quotes, and other special chars
-    let normalizedPattern = subjectPattern
-      .replace(/[\u2018\u2019]/g, "'")  // Replace ' ' with '
-      .replace(/[\u201C\u201D]/g, '"')  // Replace " " with "
-      .replace(/[\u2013\u2014]/g, '-'); // Replace – — with -
-    
-    console.log(`[EmailSearch] Searching in ${folder} for subject: ${normalizedPattern}, sortOrder: ${sortOrder}`);
-    
     const connection = session.connection;
     
     // Open the mailbox in read-only mode
     await connection.mailboxOpen(folder, { readOnly: true });
     
     try {
-      // Search by subject
-      const searchCriteria = { subject: normalizedPattern };
-      const matchingUids = await connection.search(searchCriteria, { uid: true });
+      // Try multiple search patterns to handle special characters
+      // Some email servers store special quotes, others store regular quotes
+      const searchPatterns = [
+        subjectPattern,
+        // Convert special quotes to regular
+        subjectPattern
+          .replace(/[\u2018\u2019\u0060\u00B4]/g, "'")
+          .replace(/[\u201C\u201D]/g, '"')
+          .replace(/[\u2013\u2014]/g, '-'),
+        // Convert regular quotes to special (right single quote is most common)
+        subjectPattern
+          .replace(/'/g, '\u2019')
+      ];
       
-      if (matchingUids === false || matchingUids.length === 0) {
+      // Remove duplicates
+      const uniquePatterns = [...new Set(searchPatterns)];
+      
+      let allMatchingUids: number[] = [];
+      
+      for (const pattern of uniquePatterns) {
+        console.log(`[EmailSearch] Trying pattern: ${pattern}`);
+        const searchCriteria = { subject: pattern };
+        const matchingUids = await connection.search(searchCriteria, { uid: true });
+        
+        if (matchingUids && matchingUids.length > 0) {
+          console.log(`[EmailSearch] Found ${matchingUids.length} matches with pattern: ${pattern}`);
+          allMatchingUids = [...new Set([...allMatchingUids, ...matchingUids])];
+        }
+      }
+      
+      if (allMatchingUids.length === 0) {
         return res.json({
           success: true,
           emails: [],
@@ -1398,8 +1415,8 @@ app.post('/api/emails/search', async (req, res) => {
       
       // Sort UIDs based on sortOrder
       const sortedUids = sortOrder === 'asc'
-        ? [...matchingUids].sort((a, b) => a - b)
-        : [...matchingUids].sort((a, b) => b - a);
+        ? [...allMatchingUids].sort((a, b) => a - b)
+        : [...allMatchingUids].sort((a, b) => b - a);
       const totalCount = sortedUids.length;
       const totalPages = Math.ceil(totalCount / pageSize);
       const validPage = Math.max(1, Math.min(page, totalPages));
