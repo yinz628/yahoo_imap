@@ -14,6 +14,28 @@ function normalizeQuotes(text: string): string {
 }
 
 /**
+ * Generate multiple subject search variants to handle different quote encodings.
+ * Some email servers store special quotes, others store regular quotes.
+ */
+function getSubjectVariants(subject: string): string[] {
+  const variants = new Set<string>();
+  
+  // Original
+  variants.add(subject);
+  
+  // Normalized (special → regular)
+  variants.add(normalizeQuotes(subject));
+  
+  // Convert regular quotes to special (right single quote is most common)
+  variants.add(subject.replace(/'/g, '\u2019'));
+  
+  // Normalized then convert to special
+  variants.add(normalizeQuotes(subject).replace(/'/g, '\u2019'));
+  
+  return [...variants];
+}
+
+/**
  * EmailFetcher fetches emails from an IMAP connection with filter support.
  * Supports filtering by date range, sender, subject, and folder.
  */
@@ -23,9 +45,10 @@ export class EmailFetcher {
    * Converts our filter format to IMAP search query format.
    * 
    * @param filter - The fetch filter to convert
+   * @param subjectOverride - Optional subject override for variant searching
    * @returns IMAP search object
    */
-  buildSearchCriteria(filter: FetchFilter): SearchObject {
+  buildSearchCriteria(filter: FetchFilter, subjectOverride?: string): SearchObject {
     const criteria: SearchObject = {};
 
     // Date range filters
@@ -41,8 +64,10 @@ export class EmailFetcher {
       criteria.from = filter.sender;
     }
 
-    // Subject filter - uses SUBJECT search with normalized quotes
-    if (filter.subject) {
+    // Subject filter - uses SUBJECT search
+    if (subjectOverride !== undefined) {
+      criteria.subject = subjectOverride;
+    } else if (filter.subject) {
       criteria.subject = normalizeQuotes(filter.subject);
     }
 
@@ -62,6 +87,7 @@ export class EmailFetcher {
   /**
    * Count the number of emails matching the filter criteria.
    * Useful for progress tracking.
+   * Tries multiple subject variants to handle different quote encodings.
    * 
    * @param connection - Active IMAP connection
    * @param filter - Filter criteria
@@ -74,20 +100,33 @@ export class EmailFetcher {
     await connection.mailboxOpen(folder, { readOnly: true });
 
     try {
-      const searchCriteria = this.buildSearchCriteria(filter);
-      
-      // If no filters specified, return total message count
-      if (Object.keys(searchCriteria).length === 0) {
-        const status = await connection.status(folder, { messages: true });
-        return status.messages || 0;
-      }
+      // If no subject filter, use standard search
+      if (!filter.subject) {
+        const searchCriteria = this.buildSearchCriteria(filter);
+        
+        // If no filters specified, return total message count
+        if (Object.keys(searchCriteria).length === 0) {
+          const status = await connection.status(folder, { messages: true });
+          return status.messages || 0;
+        }
 
-      // Search for matching messages
-      const uids = await connection.search(searchCriteria, { uid: true });
-      if (uids === false) {
-        return 0;
+        const uids = await connection.search(searchCriteria, { uid: true });
+        return uids === false ? 0 : uids.length;
       }
-      return uids.length;
+      
+      // Try multiple subject variants to handle different quote encodings
+      const subjectVariants = getSubjectVariants(filter.subject);
+      const allUids = new Set<number>();
+      
+      for (const variant of subjectVariants) {
+        const searchCriteria = this.buildSearchCriteria(filter, variant);
+        const uids = await connection.search(searchCriteria, { uid: true });
+        if (uids && uids.length > 0) {
+          uids.forEach(uid => allUids.add(uid));
+        }
+      }
+      
+      return allUids.size;
     } finally {
       // Close the mailbox
       await connection.mailboxClose();
@@ -97,6 +136,7 @@ export class EmailFetcher {
   /**
    * Fetch emails matching the filter criteria as an async generator.
    * Yields RawEmail objects one at a time for memory efficiency.
+   * Tries multiple subject variants to handle different quote encodings.
    * 
    * IMPORTANT: When breaking out of the loop early, the mailbox will be closed
    * automatically. However, if you need to perform another operation immediately
@@ -113,15 +153,37 @@ export class EmailFetcher {
     await connection.mailboxOpen(folder, { readOnly: true });
 
     try {
-      const searchCriteria = this.buildSearchCriteria(filter);
-      
       // Determine which messages to fetch
       let range: string;
-      if (Object.keys(searchCriteria).length === 0) {
+      
+      // Check if we have any filters
+      const hasSubjectFilter = !!filter.subject;
+      const baseSearchCriteria = this.buildSearchCriteria({ ...filter, subject: undefined });
+      const hasOtherFilters = Object.keys(baseSearchCriteria).length > 0;
+      
+      if (!hasSubjectFilter && !hasOtherFilters) {
         // No filters - fetch all messages
         range = '1:*';
+      } else if (hasSubjectFilter) {
+        // Try multiple subject variants to handle different quote encodings
+        const subjectVariants = getSubjectVariants(filter.subject!);
+        const allUids = new Set<number>();
+        
+        for (const variant of subjectVariants) {
+          const searchCriteria = this.buildSearchCriteria(filter, variant);
+          const uids = await connection.search(searchCriteria, { uid: true });
+          if (uids && uids.length > 0) {
+            uids.forEach(uid => allUids.add(uid));
+          }
+        }
+        
+        if (allUids.size === 0) {
+          return; // No matching messages
+        }
+        range = [...allUids].join(',');
       } else {
-        // Search for matching UIDs
+        // Only other filters, no subject
+        const searchCriteria = this.buildSearchCriteria(filter);
         const uids = await connection.search(searchCriteria, { uid: true });
         if (uids === false || uids.length === 0) {
           return; // No matching messages
@@ -136,7 +198,8 @@ export class EmailFetcher {
         source: true,
       };
 
-      for await (const message of connection.fetch(range, fetchOptions, { uid: Object.keys(searchCriteria).length > 0 })) {
+      const useUid = hasSubjectFilter || hasOtherFilters;
+      for await (const message of connection.fetch(range, fetchOptions, { uid: useUid })) {
         const rawEmail = this.messageToRawEmail(message);
         if (rawEmail) {
           yield rawEmail;
