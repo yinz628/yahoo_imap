@@ -1431,12 +1431,15 @@
     }
     .conversation-checkbox {
       flex-shrink: 0;
+      width: 18px;
+      height: 18px;
     }
     .conversation-expand-icon {
       flex-shrink: 0;
       font-size: 12px;
       color: #666;
       transition: transform 0.2s;
+      width: 16px;
     }
     .conversation-item.expanded .conversation-expand-icon {
       transform: rotate(90deg);
@@ -1444,6 +1447,7 @@
     .conversation-info {
       flex: 1;
       min-width: 0;
+      overflow: hidden;
     }
     .conversation-subject {
       font-weight: 500;
@@ -3319,6 +3323,8 @@
         }
         
         const data = await res.json();
+        console.log('[Conversations] API response:', data);
+        
         emailMgmtState.conversations = data.conversations || [];
         emailMgmtState.pagination = data.pagination || {
           page: 1,
@@ -3333,6 +3339,7 @@
         
         statusEl.textContent = `共 ${emailMgmtState.pagination.totalCount} 个会话`;
       } catch (e) {
+        console.error('[Conversations] Error:', e);
         showConversationContainer(`<div class="conversation-empty" style="color:#dc3545;">❌ 加载失败: ${escapeHtml(e.message)}</div>`);
         statusEl.textContent = '加载失败';
       }
@@ -3360,6 +3367,9 @@
     function renderConversations() {
       const conversations = emailMgmtState.conversations;
       
+      console.log('[Conversations] Rendering', conversations.length, 'conversations');
+      console.log('[Conversations] First conversation:', conversations[0]);
+      
       if (conversations.length === 0) {
         showConversationContainer('<div class="conversation-empty">此文件夹为空</div>');
         return;
@@ -3368,34 +3378,41 @@
       const html = conversations.map((conv, index) => {
         const latestDate = new Date(conv.latestDate);
         const dateStr = latestDate.toLocaleDateString() + ' ' + latestDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        const participants = conv.participants.slice(0, 3).join(', ') + (conv.participants.length > 3 ? '...' : '');
+        const participantsList = conv.participants || [];
+        const participants = participantsList.slice(0, 3).join(', ') + (participantsList.length > 3 ? '...' : '');
         
         // Check if any email in this conversation is selected
-        const convUids = conv.emails.map(e => e.uid);
+        const convEmails = conv.emails || [];
+        const convUids = convEmails.map(e => e.uid);
         const selectedInConv = convUids.filter(uid => emailMgmtState.selectedUids.has(uid)).length;
-        const allSelected = selectedInConv === convUids.length;
+        const allSelected = convUids.length > 0 && selectedInConv === convUids.length;
         
         // Build emails list HTML
-        const emailsHtml = conv.emails.map((email, emailIndex) => {
+        const emailsHtml = convEmails.map((email, emailIndex) => {
           const emailDate = new Date(email.date);
           const emailDateStr = emailDate.toLocaleDateString() + ' ' + emailDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
           const isSelected = emailMgmtState.selectedUids.has(email.uid);
           const isFirst = emailIndex === 0;
+          const emailSubject = email.subject || '(无主题)';
+          const emailSender = email.sender || '(未知发件人)';
           
           return `
             <div class="conversation-email-item ${isFirst ? 'first-email' : ''}" 
-                 onclick="viewEmailContent(${email.uid}, '${escapeHtml(email.subject).replace(/'/g, "\\'")}', '${escapeHtml(email.sender).replace(/'/g, "\\'")}', '${escapeHtml(email.recipient || '').replace(/'/g, "\\'")}', '${escapeHtml(emailDateStr).replace(/'/g, "\\'")}')">
+                 onclick="viewEmailContent(${email.uid}, '${escapeHtml(emailSubject).replace(/'/g, "\\'")}', '${escapeHtml(emailSender).replace(/'/g, "\\'")}', '${escapeHtml(email.recipient || '').replace(/'/g, "\\'")}', '${escapeHtml(emailDateStr).replace(/'/g, "\\'")}')">
               <input type="checkbox" class="conversation-email-checkbox" ${isSelected ? 'checked' : ''} 
                      onchange="toggleEmailSelection(${email.uid}, this.checked); event.stopPropagation();" 
                      onclick="event.stopPropagation()">
               <div class="conversation-email-info">
-                <div class="conversation-email-subject">${isFirst ? '📌 ' : ''}${escapeHtml(email.subject || '(无主题)')}</div>
-                <div class="conversation-email-sender">${escapeHtml(email.sender)}</div>
+                <div class="conversation-email-subject">${isFirst ? '📌 ' : ''}${escapeHtml(emailSubject)}</div>
+                <div class="conversation-email-sender">${escapeHtml(emailSender)}</div>
               </div>
               <div class="conversation-email-date">${escapeHtml(emailDateStr)}</div>
             </div>
           `;
         }).join('');
+        
+        const convSubject = conv.subject || '(无主题)';
+        const emailCount = conv.emailCount || convEmails.length || 0;
         
         return `
           <div class="conversation-item" data-conv-index="${index}">
@@ -3405,10 +3422,10 @@
                      onclick="event.stopPropagation()">
               <span class="conversation-expand-icon">▶</span>
               <div class="conversation-info">
-                <div class="conversation-subject">${escapeHtml(conv.subject || '(无主题)')}</div>
+                <div class="conversation-subject">${escapeHtml(convSubject)}</div>
                 <div class="conversation-meta">
-                  <span class="conversation-count">${conv.emailCount} 封</span>
-                  <span class="conversation-participants" title="${escapeHtml(conv.participants.join(', '))}">${escapeHtml(participants)}</span>
+                  <span class="conversation-count">${emailCount} 封</span>
+                  <span class="conversation-participants" title="${escapeHtml(participantsList.join(', '))}">${escapeHtml(participants)}</span>
                 </div>
               </div>
               <div class="conversation-date">${escapeHtml(dateStr)}</div>
