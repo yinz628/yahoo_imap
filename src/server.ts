@@ -1479,6 +1479,186 @@ app.post('/api/emails/search', async (req, res) => {
 });
 
 /**
+ * POST /api/emails/conversations - Get emails grouped by conversation (thread)
+ * Groups emails by normalized subject (removing Re:, Fwd:, etc.)
+ * Returns conversations sorted by latest email date
+ */
+app.post('/api/emails/conversations', async (req, res) => {
+  const { sessionId, folder = 'INBOX', page = 1, pageSize = 20, sortOrder = 'desc' } = req.body;
+  const session = await ensureSessionConnected(sessionId);
+  
+  if (!session) {
+    return res.status(400).json({ error: 'Not connected' });
+  }
+
+  try {
+    console.log(`[Conversations] Fetching conversations from ${folder}, page ${page}, pageSize ${pageSize}`);
+    
+    const connection = session.connection;
+    
+    // Open the mailbox in read-only mode
+    await connection.mailboxOpen(folder, { readOnly: true });
+    
+    try {
+      // Get total count
+      const status = await connection.status(folder, { messages: true });
+      const totalCount = status.messages || 0;
+      
+      if (totalCount === 0) {
+        return res.json({
+          success: true,
+          conversations: [],
+          pagination: {
+            page,
+            pageSize,
+            totalCount: 0,
+            totalPages: 0
+          }
+        });
+      }
+      
+      // Get all UIDs
+      const allUids = await connection.search({}, { uid: true });
+      
+      if (allUids === false || allUids.length === 0) {
+        return res.json({
+          success: true,
+          conversations: [],
+          pagination: {
+            page: 1,
+            pageSize,
+            totalCount: 0,
+            totalPages: 0
+          }
+        });
+      }
+      
+      // Fetch all envelope data to group by conversation
+      const allEmails: Array<{
+        uid: number;
+        subject: string;
+        normalizedSubject: string;
+        sender: string;
+        recipient: string;
+        date: string;
+      }> = [];
+      
+      const range = allUids.join(',');
+      
+      for await (const message of connection.fetch(range, {
+        uid: true,
+        envelope: true
+      }, { uid: true })) {
+        const envelope = message.envelope;
+        if (envelope) {
+          const fromAddr = envelope.from?.[0];
+          const toAddr = envelope.to?.[0];
+          const subject = envelope.subject || '';
+          
+          // Normalize subject by removing Re:, Fwd:, RE:, FW:, etc.
+          const normalizedSubject = subject
+            .replace(/^(Re|RE|Fwd|FWD|Fw|FW|回复|转发|答复):\s*/gi, '')
+            .replace(/^\[.*?\]\s*/, '') // Remove [tags]
+            .trim()
+            .toLowerCase();
+          
+          allEmails.push({
+            uid: message.uid,
+            subject,
+            normalizedSubject,
+            sender: fromAddr?.address || fromAddr?.name || '',
+            recipient: toAddr?.address || toAddr?.name || '',
+            date: envelope.date ? envelope.date.toISOString() : new Date().toISOString()
+          });
+        }
+      }
+      
+      // Group emails by normalized subject
+      const conversationMap = new Map<string, typeof allEmails>();
+      
+      for (const email of allEmails) {
+        const key = email.normalizedSubject || `__no_subject_${email.uid}`;
+        if (!conversationMap.has(key)) {
+          conversationMap.set(key, []);
+        }
+        conversationMap.get(key)!.push(email);
+      }
+      
+      // Convert to array and sort each conversation by date
+      const conversations = Array.from(conversationMap.entries()).map(([key, emails]) => {
+        // Sort emails within conversation by date (oldest first for reading order)
+        emails.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        const latestEmail = emails[emails.length - 1];
+        const firstEmail = emails[0];
+        
+        return {
+          id: key,
+          subject: firstEmail.subject, // Use first email's subject as conversation title
+          emailCount: emails.length,
+          latestDate: latestEmail.date,
+          firstEmail: {
+            uid: firstEmail.uid,
+            subject: firstEmail.subject,
+            sender: firstEmail.sender,
+            recipient: firstEmail.recipient,
+            date: firstEmail.date
+          },
+          latestEmail: {
+            uid: latestEmail.uid,
+            subject: latestEmail.subject,
+            sender: latestEmail.sender,
+            recipient: latestEmail.recipient,
+            date: latestEmail.date
+          },
+          participants: [...new Set(emails.map(e => e.sender))],
+          emails: emails.map(e => ({
+            uid: e.uid,
+            subject: e.subject,
+            sender: e.sender,
+            recipient: e.recipient,
+            date: e.date
+          }))
+        };
+      });
+      
+      // Sort conversations by latest email date
+      conversations.sort((a, b) => {
+        const dateA = new Date(a.latestDate).getTime();
+        const dateB = new Date(b.latestDate).getTime();
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+      });
+      
+      // Paginate conversations
+      const totalConversations = conversations.length;
+      const totalPages = Math.ceil(totalConversations / pageSize);
+      const validPage = Math.max(1, Math.min(page, totalPages));
+      const startIndex = (validPage - 1) * pageSize;
+      const endIndex = Math.min(startIndex + pageSize, totalConversations);
+      const pageConversations = conversations.slice(startIndex, endIndex);
+      
+      console.log(`[Conversations] Found ${totalConversations} conversations, returning page ${validPage}/${totalPages}`);
+      
+      res.json({
+        success: true,
+        conversations: pageConversations,
+        pagination: {
+          page: validPage,
+          pageSize,
+          totalCount: totalConversations,
+          totalPages
+        }
+      });
+    } finally {
+      await connection.mailboxClose();
+    }
+  } catch (error) {
+    console.error('[Conversations] Error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+});
+
+/**
  * POST /api/emails/batch-delete - Delete multiple emails by UID
  * Moves emails to Trash folder
  * Requirements: 6.5

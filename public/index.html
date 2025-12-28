@@ -1402,6 +1402,148 @@
     html {
       scroll-behavior: smooth;
     }
+    
+    /* Conversation View Styles */
+    .conversation-item {
+      background: white;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      margin-bottom: 10px;
+      overflow: hidden;
+      transition: all 0.2s;
+    }
+    .conversation-item:hover {
+      border-color: #6001d2;
+      box-shadow: 0 2px 8px rgba(96, 1, 210, 0.1);
+    }
+    .conversation-item.expanded {
+      border-color: #6001d2;
+    }
+    .conversation-header {
+      display: flex;
+      align-items: center;
+      padding: 12px 15px;
+      cursor: pointer;
+      gap: 12px;
+    }
+    .conversation-header:hover {
+      background: #f8f9fa;
+    }
+    .conversation-checkbox {
+      flex-shrink: 0;
+    }
+    .conversation-expand-icon {
+      flex-shrink: 0;
+      font-size: 12px;
+      color: #666;
+      transition: transform 0.2s;
+    }
+    .conversation-item.expanded .conversation-expand-icon {
+      transform: rotate(90deg);
+    }
+    .conversation-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .conversation-subject {
+      font-weight: 500;
+      color: #333;
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .conversation-meta {
+      display: flex;
+      gap: 15px;
+      font-size: 12px;
+      color: #666;
+    }
+    .conversation-count {
+      background: #6001d2;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .conversation-participants {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 200px;
+    }
+    .conversation-date {
+      flex-shrink: 0;
+      font-size: 12px;
+      color: #666;
+    }
+    .conversation-emails {
+      display: none;
+      border-top: 1px solid #e0e0e0;
+      background: #f9f9f9;
+    }
+    .conversation-item.expanded .conversation-emails {
+      display: block;
+    }
+    .conversation-email-item {
+      display: flex;
+      align-items: center;
+      padding: 10px 15px 10px 45px;
+      border-bottom: 1px solid #eee;
+      cursor: pointer;
+      gap: 10px;
+    }
+    .conversation-email-item:last-child {
+      border-bottom: none;
+    }
+    .conversation-email-item:hover {
+      background: #f0e6ff;
+    }
+    .conversation-email-item.first-email {
+      background: #fff9e6;
+    }
+    .conversation-email-checkbox {
+      flex-shrink: 0;
+    }
+    .conversation-email-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .conversation-email-subject {
+      font-size: 13px;
+      color: #333;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .conversation-email-sender {
+      font-size: 12px;
+      color: #666;
+    }
+    .conversation-email-date {
+      flex-shrink: 0;
+      font-size: 11px;
+      color: #999;
+    }
+    .conversation-empty {
+      text-align: center;
+      padding: 30px;
+      color: #666;
+    }
+    
+    /* View mode toggle button styles */
+    #btnListView.active, #btnConversationView.active {
+      background: #6001d2;
+      color: white;
+    }
+    #btnListView:not(.active), #btnConversationView:not(.active) {
+      background: #f0f0f0;
+      color: #333;
+    }
+    #btnListView:not(.active):hover, #btnConversationView:not(.active):hover {
+      background: #e0e0e0;
+    }
   </style>
 </head>
 <body>
@@ -1836,6 +1978,13 @@
                   <button class="btn-danger" onclick="batchDeleteSelectedEmails()" id="btnBatchDelete" disabled>🗑️ 删除选中 (<span id="selectedCount">0</span>)</button>
                   <button class="btn-secondary" onclick="showMoveEmailsModal()" id="btnMoveEmails" disabled>📂 移动选中</button>
                   <button class="btn-secondary" onclick="refreshEmailList()">🔄 刷新</button>
+                  
+                  <!-- View Mode Toggle -->
+                  <div style="display:flex; align-items:center; gap:5px; margin-left:10px; border:1px solid #ddd; border-radius:4px; overflow:hidden;">
+                    <button id="btnListView" onclick="switchEmailViewMode('list')" style="padding:6px 12px; font-size:12px; border:none; background:#6001d2; color:white; cursor:pointer;">📋 列表</button>
+                    <button id="btnConversationView" onclick="switchEmailViewMode('conversation')" style="padding:6px 12px; font-size:12px; border:none; background:#f0f0f0; color:#333; cursor:pointer;">💬 会话</button>
+                  </div>
+                  
                   <div style="display:flex; align-items:center; gap:5px; margin-left:10px;">
                     <label style="margin:0; font-size:13px;">排序:</label>
                     <select id="emailSortOrder" onchange="changeEmailSortOrder()" style="padding:4px 8px; font-size:13px;">
@@ -2866,6 +3015,7 @@
       currentFolder: null,
       folders: [],
       emails: [],
+      conversations: [],
       selectedUids: new Set(),
       pagination: {
         page: 1,
@@ -2875,7 +3025,8 @@
       },
       searchPattern: '',
       isSearchMode: false,
-      sortOrder: 'desc' // 'desc' = newest first, 'asc' = oldest first
+      sortOrder: 'desc', // 'desc' = newest first, 'asc' = oldest first
+      viewMode: 'list' // 'list' or 'conversation'
     };
     
     // Initialize email management module
@@ -3016,6 +3167,12 @@
     
     // Load email list for current folder
     async function loadEmailList() {
+      // If in conversation view mode, load conversations instead
+      if (emailMgmtState.viewMode === 'conversation') {
+        await loadConversations();
+        return;
+      }
+      
       const tableBody = document.getElementById('emailTableBody');
       const statusEl = document.getElementById('emailListStatus');
       
@@ -3074,6 +3231,11 @@
       const tableBody = document.getElementById('emailTableBody');
       const emails = emailMgmtState.emails;
       
+      // Show table, hide conversation container
+      document.getElementById('emailTable').style.display = 'table';
+      const convContainer = document.getElementById('conversationContainer');
+      if (convContainer) convContainer.style.display = 'none';
+      
       if (emails.length === 0) {
         const message = emailMgmtState.isSearchMode ? '没有找到匹配的邮件' : '此文件夹为空';
         tableBody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:30px; color:#666;">${message}</td></tr>`;
@@ -3100,6 +3262,223 @@
       }).join('');
     }
     
+    // ==================== Conversation View Functions ====================
+    
+    // Switch between list and conversation view modes
+    function switchEmailViewMode(mode) {
+      emailMgmtState.viewMode = mode;
+      emailMgmtState.pagination.page = 1;
+      emailMgmtState.selectedUids.clear();
+      document.getElementById('selectAllEmails').checked = false;
+      
+      // Update button styles
+      const listBtn = document.getElementById('btnListView');
+      const convBtn = document.getElementById('btnConversationView');
+      
+      if (mode === 'list') {
+        listBtn.style.background = '#6001d2';
+        listBtn.style.color = 'white';
+        convBtn.style.background = '#f0f0f0';
+        convBtn.style.color = '#333';
+      } else {
+        listBtn.style.background = '#f0f0f0';
+        listBtn.style.color = '#333';
+        convBtn.style.background = '#6001d2';
+        convBtn.style.color = 'white';
+      }
+      
+      // Reload data
+      loadEmailList();
+    }
+    
+    // Load conversations for current folder
+    async function loadConversations() {
+      const tableBody = document.getElementById('emailTableBody');
+      const statusEl = document.getElementById('emailListStatus');
+      
+      if (!sessionId || !emailMgmtState.currentFolder) {
+        showConversationContainer('<div class="conversation-empty">选择一个文件夹以查看邮件</div>');
+        return;
+      }
+      
+      statusEl.textContent = '加载会话中...';
+      showConversationContainer('<div class="conversation-empty">⏳ 正在加载会话...</div>');
+      
+      try {
+        const res = await apiPost('/api/emails/conversations', {
+          sessionId,
+          folder: emailMgmtState.currentFolder,
+          page: emailMgmtState.pagination.page,
+          pageSize: emailMgmtState.pagination.pageSize,
+          sortOrder: emailMgmtState.sortOrder
+        });
+        
+        if (!res.ok) {
+          const error = await res.json();
+          throw new Error(error.error || 'Failed to load conversations');
+        }
+        
+        const data = await res.json();
+        emailMgmtState.conversations = data.conversations || [];
+        emailMgmtState.pagination = data.pagination || {
+          page: 1,
+          pageSize: 20,
+          totalCount: 0,
+          totalPages: 0
+        };
+        
+        renderConversations();
+        updatePaginationUI();
+        updateSelectedCount();
+        
+        statusEl.textContent = `共 ${emailMgmtState.pagination.totalCount} 个会话`;
+      } catch (e) {
+        showConversationContainer(`<div class="conversation-empty" style="color:#dc3545;">❌ 加载失败: ${escapeHtml(e.message)}</div>`);
+        statusEl.textContent = '加载失败';
+      }
+    }
+    
+    // Show conversation container and hide table
+    function showConversationContainer(content) {
+      // Hide table
+      document.getElementById('emailTable').style.display = 'none';
+      
+      // Get or create conversation container
+      let convContainer = document.getElementById('conversationContainer');
+      if (!convContainer) {
+        convContainer = document.createElement('div');
+        convContainer.id = 'conversationContainer';
+        convContainer.style.marginTop = '10px';
+        document.getElementById('emailTable').parentNode.appendChild(convContainer);
+      }
+      
+      convContainer.style.display = 'block';
+      convContainer.innerHTML = content;
+    }
+    
+    // Render conversations
+    function renderConversations() {
+      const conversations = emailMgmtState.conversations;
+      
+      if (conversations.length === 0) {
+        showConversationContainer('<div class="conversation-empty">此文件夹为空</div>');
+        return;
+      }
+      
+      const html = conversations.map((conv, index) => {
+        const latestDate = new Date(conv.latestDate);
+        const dateStr = latestDate.toLocaleDateString() + ' ' + latestDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const participants = conv.participants.slice(0, 3).join(', ') + (conv.participants.length > 3 ? '...' : '');
+        
+        // Check if any email in this conversation is selected
+        const convUids = conv.emails.map(e => e.uid);
+        const selectedInConv = convUids.filter(uid => emailMgmtState.selectedUids.has(uid)).length;
+        const allSelected = selectedInConv === convUids.length;
+        
+        // Build emails list HTML
+        const emailsHtml = conv.emails.map((email, emailIndex) => {
+          const emailDate = new Date(email.date);
+          const emailDateStr = emailDate.toLocaleDateString() + ' ' + emailDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+          const isSelected = emailMgmtState.selectedUids.has(email.uid);
+          const isFirst = emailIndex === 0;
+          
+          return `
+            <div class="conversation-email-item ${isFirst ? 'first-email' : ''}" 
+                 onclick="viewEmailContent(${email.uid}, '${escapeHtml(email.subject).replace(/'/g, "\\'")}', '${escapeHtml(email.sender).replace(/'/g, "\\'")}', '${escapeHtml(email.recipient || '').replace(/'/g, "\\'")}', '${escapeHtml(emailDateStr).replace(/'/g, "\\'")}')">
+              <input type="checkbox" class="conversation-email-checkbox" ${isSelected ? 'checked' : ''} 
+                     onchange="toggleEmailSelection(${email.uid}, this.checked); event.stopPropagation();" 
+                     onclick="event.stopPropagation()">
+              <div class="conversation-email-info">
+                <div class="conversation-email-subject">${isFirst ? '📌 ' : ''}${escapeHtml(email.subject || '(无主题)')}</div>
+                <div class="conversation-email-sender">${escapeHtml(email.sender)}</div>
+              </div>
+              <div class="conversation-email-date">${escapeHtml(emailDateStr)}</div>
+            </div>
+          `;
+        }).join('');
+        
+        return `
+          <div class="conversation-item" data-conv-index="${index}">
+            <div class="conversation-header" onclick="toggleConversation(${index}, event)">
+              <input type="checkbox" class="conversation-checkbox" ${allSelected ? 'checked' : ''} 
+                     onchange="toggleConversationSelection(${index}, this.checked)" 
+                     onclick="event.stopPropagation()">
+              <span class="conversation-expand-icon">▶</span>
+              <div class="conversation-info">
+                <div class="conversation-subject">${escapeHtml(conv.subject || '(无主题)')}</div>
+                <div class="conversation-meta">
+                  <span class="conversation-count">${conv.emailCount} 封</span>
+                  <span class="conversation-participants" title="${escapeHtml(conv.participants.join(', '))}">${escapeHtml(participants)}</span>
+                </div>
+              </div>
+              <div class="conversation-date">${escapeHtml(dateStr)}</div>
+            </div>
+            <div class="conversation-emails">
+              ${emailsHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+      
+      showConversationContainer(html);
+    }
+    
+    // Toggle conversation expansion
+    function toggleConversation(index, event) {
+      // Don't toggle if clicking on checkbox
+      if (event.target.type === 'checkbox') return;
+      
+      const convItem = document.querySelector(`.conversation-item[data-conv-index="${index}"]`);
+      if (convItem) {
+        const wasExpanded = convItem.classList.contains('expanded');
+        convItem.classList.toggle('expanded');
+        
+        // If expanding and clicking on the conversation header (not on a specific email),
+        // automatically view the first email's content
+        if (!wasExpanded) {
+          const conv = emailMgmtState.conversations[index];
+          if (conv && conv.firstEmail) {
+            const firstEmail = conv.firstEmail;
+            const emailDate = new Date(firstEmail.date);
+            const emailDateStr = emailDate.toLocaleDateString() + ' ' + emailDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            viewEmailContent(
+              firstEmail.uid, 
+              firstEmail.subject, 
+              firstEmail.sender, 
+              firstEmail.recipient || '', 
+              emailDateStr
+            );
+          }
+        }
+      }
+    }
+    
+    // Toggle selection for all emails in a conversation
+    function toggleConversationSelection(index, isSelected) {
+      const conv = emailMgmtState.conversations[index];
+      if (!conv) return;
+      
+      conv.emails.forEach(email => {
+        if (isSelected) {
+          emailMgmtState.selectedUids.add(email.uid);
+        } else {
+          emailMgmtState.selectedUids.delete(email.uid);
+        }
+      });
+      
+      // Update checkboxes in the conversation
+      const convItem = document.querySelector(`.conversation-item[data-conv-index="${index}"]`);
+      if (convItem) {
+        const checkboxes = convItem.querySelectorAll('.conversation-email-checkbox');
+        checkboxes.forEach(cb => {
+          cb.checked = isSelected;
+        });
+      }
+      
+      updateSelectedCount();
+      updateSelectAllCheckbox();
+    }
+    
     // Toggle email selection
     function toggleEmailSelection(uid, isSelected) {
       if (isSelected) {
@@ -3123,25 +3502,50 @@
       const selectAll = document.getElementById('selectAllEmails');
       const isChecked = selectAll.checked;
       
-      emailMgmtState.emails.forEach(email => {
-        if (isChecked) {
-          emailMgmtState.selectedUids.add(email.uid);
-        } else {
-          emailMgmtState.selectedUids.delete(email.uid);
-        }
-      });
-      
-      // Update all checkboxes
-      const checkboxes = document.querySelectorAll('.email-checkbox');
-      checkboxes.forEach(cb => {
-        cb.checked = isChecked;
-      });
-      
-      // Update row styling
-      const rows = document.querySelectorAll('.email-row');
-      rows.forEach(row => {
-        row.classList.toggle('selected', isChecked);
-      });
+      if (emailMgmtState.viewMode === 'conversation') {
+        // In conversation view, select all emails from all conversations
+        emailMgmtState.conversations.forEach(conv => {
+          conv.emails.forEach(email => {
+            if (isChecked) {
+              emailMgmtState.selectedUids.add(email.uid);
+            } else {
+              emailMgmtState.selectedUids.delete(email.uid);
+            }
+          });
+        });
+        
+        // Update all checkboxes in conversations
+        const convCheckboxes = document.querySelectorAll('.conversation-checkbox');
+        convCheckboxes.forEach(cb => {
+          cb.checked = isChecked;
+        });
+        
+        const emailCheckboxes = document.querySelectorAll('.conversation-email-checkbox');
+        emailCheckboxes.forEach(cb => {
+          cb.checked = isChecked;
+        });
+      } else {
+        // In list view
+        emailMgmtState.emails.forEach(email => {
+          if (isChecked) {
+            emailMgmtState.selectedUids.add(email.uid);
+          } else {
+            emailMgmtState.selectedUids.delete(email.uid);
+          }
+        });
+        
+        // Update all checkboxes
+        const checkboxes = document.querySelectorAll('.email-checkbox');
+        checkboxes.forEach(cb => {
+          cb.checked = isChecked;
+        });
+        
+        // Update row styling
+        const rows = document.querySelectorAll('.email-row');
+        rows.forEach(row => {
+          row.classList.toggle('selected', isChecked);
+        });
+      }
       
       updateSelectedCount();
     }
@@ -4294,11 +4698,13 @@
           currentFolder: null,
           folders: [],
           emails: [],
+          conversations: [],
           selectedUids: new Set(),
           pagination: { page: 1, pageSize: 20, totalCount: 0, totalPages: 0 },
           searchPattern: '',
           isSearchMode: false,
-          sortOrder: 'desc'
+          sortOrder: 'desc',
+          viewMode: 'list'
         };
         
         // Re-initialize email management if on that module
