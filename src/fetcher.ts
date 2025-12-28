@@ -240,23 +240,43 @@ export class EmailFetcher {
     await connection.mailboxOpen(folder, { readOnly: true });
 
     try {
-      const searchCriteria = this.buildSearchCriteria(filter);
-      
       // Search for matching UIDs
-      let uids: number[] | false;
-      if (Object.keys(searchCriteria).length === 0) {
-        // No filters - get all UIDs
-        uids = await connection.search({}, { uid: true });
+      let allUids: number[] = [];
+      
+      if (!filter.subject) {
+        // No subject filter - use standard search
+        const searchCriteria = this.buildSearchCriteria(filter);
+        
+        if (Object.keys(searchCriteria).length === 0) {
+          // No filters - get all UIDs
+          const uids = await connection.search({}, { uid: true });
+          allUids = uids === false ? [] : uids;
+        } else {
+          const uids = await connection.search(searchCriteria, { uid: true });
+          allUids = uids === false ? [] : uids;
+        }
       } else {
-        uids = await connection.search(searchCriteria, { uid: true });
+        // Try multiple subject variants to handle different quote encodings
+        const subjectVariants = getSubjectVariants(filter.subject);
+        const uidSet = new Set<number>();
+        
+        for (const variant of subjectVariants) {
+          const searchCriteria = this.buildSearchCriteria(filter, variant);
+          const uids = await connection.search(searchCriteria, { uid: true });
+          if (uids && uids.length > 0) {
+            uids.forEach(uid => uidSet.add(uid));
+          }
+        }
+        
+        allUids = [...uidSet];
       }
       
-      if (uids === false || uids.length === 0) {
+      if (allUids.length === 0) {
         return results;
       }
 
       // Limit the UIDs
-      const limitedUids = uids.slice(0, limit);
+      const limitedUids = allUids.slice(0, limit);
       const range = limitedUids.join(',');
 
       // Fetch messages with required fields
