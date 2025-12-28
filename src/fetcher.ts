@@ -3,6 +3,17 @@ import type { FetchFilter, RawEmail } from './types.js';
 import type { ImapFlow, FetchMessageObject, SearchObject } from 'imapflow';
 
 /**
+ * Normalize special quote characters to standard ASCII equivalents.
+ * This helps with IMAP search compatibility across different email servers.
+ */
+function normalizeQuotes(text: string): string {
+  return text
+    .replace(/[\u2018\u2019\u0060\u00B4]/g, "'")  // Various single quotes → '
+    .replace(/[\u201C\u201D]/g, '"')               // Curly double quotes → "
+    .replace(/[\u2013\u2014]/g, '-');              // En/em dashes → -
+}
+
+/**
  * EmailFetcher fetches emails from an IMAP connection with filter support.
  * Supports filtering by date range, sender, subject, and folder.
  */
@@ -30,9 +41,9 @@ export class EmailFetcher {
       criteria.from = filter.sender;
     }
 
-    // Subject filter - uses SUBJECT search
+    // Subject filter - uses SUBJECT search with normalized quotes
     if (filter.subject) {
-      criteria.subject = filter.subject;
+      criteria.subject = normalizeQuotes(filter.subject);
     }
 
     return criteria;
@@ -269,10 +280,10 @@ export function filterEmails(emails: RawEmail[], filter: FetchFilter): RawEmail[
       }
     }
 
-    // Subject filter - case-insensitive substring match
+    // Subject filter - case-insensitive substring match with quote normalization
     if (filter.subject) {
-      const subjectFilterLower = filter.subject.toLowerCase();
-      const subjectLower = email.subject.toLowerCase();
+      const subjectFilterLower = normalizeQuotes(filter.subject).toLowerCase();
+      const subjectLower = normalizeQuotes(email.subject).toLowerCase();
       if (!subjectLower.includes(subjectFilterLower)) {
         return false;
       }
