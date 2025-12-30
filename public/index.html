@@ -1509,10 +1509,13 @@
     }
     .conversation-email-checkbox {
       flex-shrink: 0;
+      width: 18px;
+      height: 18px;
     }
     .conversation-email-info {
       flex: 1;
       min-width: 0;
+      overflow: hidden;
     }
     .conversation-email-subject {
       font-size: 13px;
@@ -1520,15 +1523,20 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      margin-bottom: 2px;
     }
     .conversation-email-sender {
       font-size: 12px;
       color: #666;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .conversation-email-date {
       flex-shrink: 0;
       font-size: 11px;
       color: #999;
+      white-space: nowrap;
     }
     .conversation-empty {
       text-align: center;
@@ -3396,9 +3404,20 @@
           const emailSubject = email.subject || '(无主题)';
           const emailSender = email.sender || '(未知发件人)';
           
+          // Escape for HTML attribute (onclick)
+          const safeSubject = escapeHtml(emailSubject).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+          const safeSender = escapeHtml(emailSender).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+          const safeRecipient = escapeHtml(email.recipient || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+          const safeDateStr = escapeHtml(emailDateStr).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+          
           return `
             <div class="conversation-email-item ${isFirst ? 'first-email' : ''}" 
-                 onclick="viewEmailContent(${email.uid}, '${escapeHtml(emailSubject).replace(/'/g, "\\'")}', '${escapeHtml(emailSender).replace(/'/g, "\\'")}', '${escapeHtml(email.recipient || '').replace(/'/g, "\\'")}', '${escapeHtml(emailDateStr).replace(/'/g, "\\'")}')">
+                 data-uid="${email.uid}"
+                 data-subject="${safeSubject}"
+                 data-sender="${safeSender}"
+                 data-recipient="${safeRecipient}"
+                 data-date="${safeDateStr}"
+                 onclick="viewConversationEmail(this)">
               <input type="checkbox" class="conversation-email-checkbox" ${isSelected ? 'checked' : ''} 
                      onchange="toggleEmailSelection(${email.uid}, this.checked); event.stopPropagation();" 
                      onclick="event.stopPropagation()">
@@ -3494,6 +3513,17 @@
       
       updateSelectedCount();
       updateSelectAllCheckbox();
+    }
+    
+    // View email content from conversation (using data attributes)
+    function viewConversationEmail(element) {
+      const uid = parseInt(element.dataset.uid);
+      const subject = element.dataset.subject || '(无主题)';
+      const sender = element.dataset.sender || '(未知发件人)';
+      const recipient = element.dataset.recipient || '';
+      const dateStr = element.dataset.date || '';
+      
+      viewEmailContent(uid, subject, sender, recipient, dateStr);
     }
     
     // Toggle email selection
