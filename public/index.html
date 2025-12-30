@@ -3373,90 +3373,100 @@
     
     // Render conversations
     function renderConversations() {
-      const conversations = emailMgmtState.conversations;
+      const conversations = emailMgmtState.conversations || [];
       
       console.log('[Conversations] Rendering', conversations.length, 'conversations');
-      console.log('[Conversations] First conversation:', conversations[0]);
       
-      if (conversations.length === 0) {
+      if (!conversations || conversations.length === 0) {
         showConversationContainer('<div class="conversation-empty">此文件夹为空</div>');
         return;
       }
       
-      const html = conversations.map((conv, index) => {
-        const latestDate = new Date(conv.latestDate);
-        const dateStr = latestDate.toLocaleDateString() + ' ' + latestDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        const participantsList = conv.participants || [];
-        const participants = participantsList.slice(0, 3).join(', ') + (participantsList.length > 3 ? '...' : '');
-        
-        // Check if any email in this conversation is selected
-        const convEmails = conv.emails || [];
-        const convUids = convEmails.map(e => e.uid);
-        const selectedInConv = convUids.filter(uid => emailMgmtState.selectedUids.has(uid)).length;
-        const allSelected = convUids.length > 0 && selectedInConv === convUids.length;
-        
-        // Build emails list HTML
-        const emailsHtml = convEmails.map((email, emailIndex) => {
-          const emailDate = new Date(email.date);
-          const emailDateStr = emailDate.toLocaleDateString() + ' ' + emailDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-          const isSelected = emailMgmtState.selectedUids.has(email.uid);
-          const isFirst = emailIndex === 0;
-          const emailSubject = email.subject || '(无主题)';
-          const emailSender = email.sender || '(未知发件人)';
+      try {
+        const html = conversations.map((conv, index) => {
+          if (!conv) return '';
           
-          // Escape for HTML attribute (onclick)
-          const safeSubject = escapeHtml(emailSubject).replace(/'/g, "\\'").replace(/"/g, '&quot;');
-          const safeSender = escapeHtml(emailSender).replace(/'/g, "\\'").replace(/"/g, '&quot;');
-          const safeRecipient = escapeHtml(email.recipient || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-          const safeDateStr = escapeHtml(emailDateStr).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+          const latestDate = conv.latestDate ? new Date(conv.latestDate) : new Date();
+          const dateStr = latestDate.toLocaleDateString() + ' ' + latestDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+          const participantsList = conv.participants || [];
+          const participants = participantsList.length > 0 
+            ? participantsList.slice(0, 3).join(', ') + (participantsList.length > 3 ? '...' : '')
+            : '(未知)';
+          
+          // Check if any email in this conversation is selected
+          const convEmails = conv.emails || [];
+          const convUids = convEmails.filter(e => e).map(e => e.uid);
+          const selectedInConv = convUids.filter(uid => emailMgmtState.selectedUids.has(uid)).length;
+          const allSelected = convUids.length > 0 && selectedInConv === convUids.length;
+          
+          // Build emails list HTML
+          const emailsHtml = convEmails.map((email, emailIndex) => {
+            if (!email) return '';
+            
+            const emailDate = email.date ? new Date(email.date) : new Date();
+            const emailDateStr = emailDate.toLocaleDateString() + ' ' + emailDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const isSelected = emailMgmtState.selectedUids.has(email.uid);
+            const isFirst = emailIndex === 0;
+            const emailSubject = email.subject || '(无主题)';
+            const emailSender = email.sender || '(未知发件人)';
+            
+            // Escape for HTML attribute (onclick)
+            const safeSubject = escapeHtml(emailSubject).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const safeSender = escapeHtml(emailSender).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const safeRecipient = escapeHtml(email.recipient || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const safeDateStr = escapeHtml(emailDateStr).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            
+            return `
+              <div class="conversation-email-item ${isFirst ? 'first-email' : ''}" 
+                   data-uid="${email.uid}"
+                   data-subject="${safeSubject}"
+                   data-sender="${safeSender}"
+                   data-recipient="${safeRecipient}"
+                   data-date="${safeDateStr}"
+                   onclick="viewConversationEmail(this)">
+                <input type="checkbox" class="conversation-email-checkbox" ${isSelected ? 'checked' : ''} 
+                       onchange="toggleEmailSelection(${email.uid}, this.checked); event.stopPropagation();" 
+                       onclick="event.stopPropagation()">
+                <div class="conversation-email-info">
+                  <div class="conversation-email-subject">${isFirst ? '📌 ' : ''}${escapeHtml(emailSubject)}</div>
+                  <div class="conversation-email-sender">${escapeHtml(emailSender)}</div>
+                </div>
+                <div class="conversation-email-date">${escapeHtml(emailDateStr)}</div>
+              </div>
+            `;
+          }).join('');
+          
+          const convSubject = conv.subject || '(无主题)';
+          const emailCount = conv.emailCount || convEmails.length || 0;
           
           return `
-            <div class="conversation-email-item ${isFirst ? 'first-email' : ''}" 
-                 data-uid="${email.uid}"
-                 data-subject="${safeSubject}"
-                 data-sender="${safeSender}"
-                 data-recipient="${safeRecipient}"
-                 data-date="${safeDateStr}"
-                 onclick="viewConversationEmail(this)">
-              <input type="checkbox" class="conversation-email-checkbox" ${isSelected ? 'checked' : ''} 
-                     onchange="toggleEmailSelection(${email.uid}, this.checked); event.stopPropagation();" 
-                     onclick="event.stopPropagation()">
-              <div class="conversation-email-info">
-                <div class="conversation-email-subject">${isFirst ? '📌 ' : ''}${escapeHtml(emailSubject)}</div>
-                <div class="conversation-email-sender">${escapeHtml(emailSender)}</div>
+            <div class="conversation-item" data-conv-index="${index}">
+              <div class="conversation-header" onclick="toggleConversation(${index}, event)">
+                <input type="checkbox" class="conversation-checkbox" ${allSelected ? 'checked' : ''} 
+                       onchange="toggleConversationSelection(${index}, this.checked)" 
+                       onclick="event.stopPropagation()">
+                <span class="conversation-expand-icon">▶</span>
+                <div class="conversation-info">
+                  <div class="conversation-subject">${escapeHtml(convSubject)}</div>
+                  <div class="conversation-meta">
+                    <span class="conversation-count">${emailCount} 封</span>
+                    <span class="conversation-participants" title="${escapeHtml(participantsList.join(', '))}">${escapeHtml(participants)}</span>
+                  </div>
+                </div>
+                <div class="conversation-date">${escapeHtml(dateStr)}</div>
               </div>
-              <div class="conversation-email-date">${escapeHtml(emailDateStr)}</div>
+              <div class="conversation-emails">
+                ${emailsHtml}
+              </div>
             </div>
           `;
         }).join('');
         
-        const convSubject = conv.subject || '(无主题)';
-        const emailCount = conv.emailCount || convEmails.length || 0;
-        
-        return `
-          <div class="conversation-item" data-conv-index="${index}">
-            <div class="conversation-header" onclick="toggleConversation(${index}, event)">
-              <input type="checkbox" class="conversation-checkbox" ${allSelected ? 'checked' : ''} 
-                     onchange="toggleConversationSelection(${index}, this.checked)" 
-                     onclick="event.stopPropagation()">
-              <span class="conversation-expand-icon">▶</span>
-              <div class="conversation-info">
-                <div class="conversation-subject">${escapeHtml(convSubject)}</div>
-                <div class="conversation-meta">
-                  <span class="conversation-count">${emailCount} 封</span>
-                  <span class="conversation-participants" title="${escapeHtml(participantsList.join(', '))}">${escapeHtml(participants)}</span>
-                </div>
-              </div>
-              <div class="conversation-date">${escapeHtml(dateStr)}</div>
-            </div>
-            <div class="conversation-emails">
-              ${emailsHtml}
-            </div>
-          </div>
-        `;
-      }).join('');
-      
-      showConversationContainer(html);
+        showConversationContainer(html);
+      } catch (e) {
+        console.error('[Conversations] Render error:', e);
+        showConversationContainer(`<div class="conversation-empty" style="color:#dc3545;">❌ 渲染失败: ${escapeHtml(e.message)}</div>`);
+      }
     }
     
     // Toggle conversation expansion
