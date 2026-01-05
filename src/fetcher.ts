@@ -224,6 +224,112 @@ export class EmailFetcher {
   }
 
   /**
+   * Get all UIDs matching the filter criteria.
+   * Useful for batch processing with resume capability.
+   * 
+   * @param connection - Active IMAP connection
+   * @param filter - Filter criteria
+   * @returns Array of UIDs sorted in ascending order
+   */
+  async getMatchingUIDs(connection: ImapFlow, filter: FetchFilter): Promise<number[]> {
+    const folder = this.getFolder(filter);
+    
+    // Open the mailbox in read-only mode
+    await connection.mailboxOpen(folder, { readOnly: true });
+
+    try {
+      let allUids: number[] = [];
+      
+      if (!filter.subject) {
+        // No subject filter - use standard search
+        const searchCriteria = this.buildSearchCriteria(filter);
+        
+        if (Object.keys(searchCriteria).length === 0) {
+          // No filters - get all UIDs
+          const uids = await connection.search({}, { uid: true });
+          allUids = uids === false ? [] : uids;
+        } else {
+          const uids = await connection.search(searchCriteria, { uid: true });
+          allUids = uids === false ? [] : uids;
+        }
+      } else {
+        // Try multiple subject variants to handle different quote encodings
+        const subjectVariants = getSubjectVariants(filter.subject);
+        const uidSet = new Set<number>();
+        
+        for (const variant of subjectVariants) {
+          const searchCriteria = this.buildSearchCriteria(filter, variant);
+          const uids = await connection.search(searchCriteria, { uid: true });
+          if (uids && uids.length > 0) {
+            uids.forEach(uid => uidSet.add(uid));
+          }
+        }
+        
+        allUids = [...uidSet];
+      }
+      
+      // Sort UIDs in ascending order for consistent processing
+      return allUids.sort((a, b) => a - b);
+    } finally {
+      await connection.mailboxClose();
+    }
+  }
+
+  /**
+   * Fetch emails by specific UIDs.
+   * Useful for batch processing with resume capability.
+   * 
+   * @param connection - Active IMAP connection
+   * @param folder - Folder name
+   * @param uids - Array of UIDs to fetch
+   * @returns Array of RawEmail objects
+   */
+  async fetchByUIDs(connection: ImapFlow, folder: string, uids: number[]): Promise<RawEmail[]> {
+    if (uids.length === 0) {
+      return [];
+    }
+
+    const results: RawEmail[] = [];
+    
+    // Open the mailbox in read-only mode
+    await connection.mailboxOpen(folder, { readOnly: true });
+
+    try {
+      const range = uids.join(',');
+
+      // Fetch messages with required fields
+      const fetchOptions = {
+        uid: true,
+        envelope: true,
+        source: true,
+      };
+
+      for await (const message of connection.fetch(range, fetchOptions, { uid: true })) {
+        const rawEmail = this.messageToRawEmail(message);
+        if (rawEmail) {
+          results.push(rawEmail);
+        }
+      }
+    } finally {
+      // Close the mailbox with timeout
+      try {
+        const closePromise = connection.mailboxClose();
+        const timeoutPromise = new Promise<void>((resolve) => {
+          setTimeout(() => {
+            console.warn('[Fetcher] Mailbox close timed out, continuing...');
+            resolve();
+          }, 5000);
+        });
+        await Promise.race([closePromise, timeoutPromise]);
+      } catch (error) {
+        console.warn('[Fetcher] Mailbox close error:', error instanceof Error ? error.message : 'Unknown');
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Fetch a limited number of emails matching the filter criteria.
    * This is safer than using fetch() with a break statement.
    * 

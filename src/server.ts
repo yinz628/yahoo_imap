@@ -716,7 +716,7 @@ app.post('/api/preview', async (req, res) => {
 });
 
 
-// Extract endpoint - single-threaded with speed control and progress streaming
+// Extract endpoint - batch processing with auto-reconnect and resume capability
 app.post('/api/extract', async (req, res) => {
   const { sessionId, filter, pattern, stripHtml, delayMs = 100 } = req.body;
   let session = await ensureSessionConnected(sessionId);
@@ -747,60 +747,65 @@ app.post('/api/extract', async (req, res) => {
   console.log(`[Extract] Filter: ${JSON.stringify(fetchFilter)}`);
   console.log(`[Extract] Delay: ${delayMs}ms, StripHtml: ${stripHtml}`);
 
-  // Helper function to keep connection alive
-  const keepAlive = () => {
-    if (session) {
-      session.lastActivity = Date.now();
+  // Helper function to reconnect
+  const reconnect = async (): Promise<boolean> => {
+    console.log(`[Extract] Attempting to reconnect...`);
+    const imapSettings = getIMAPSettings(session!.provider);
+    
+    // First try to disconnect cleanly
+    try {
+      await session!.connector.disconnect();
+    } catch {
+      // Ignore disconnect errors
     }
-  };
+    
+    // Wait a bit before reconnecting
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    const result = await session!.connector.connect({
+      email: session!.email,
+      password: session!.password,
+      host: imapSettings.host,
+      port: imapSettings.port,
+      tls: imapSettings.tls,
+    });
 
-  // Helper function to check and reconnect if needed
-  const ensureConnection = async (): Promise<boolean> => {
-    if (!session) {
-      session = await ensureSessionConnected(sessionId);
-      return session !== null;
+    if (result.success && result.connection) {
+      session!.connection = result.connection;
+      session!.lastActivity = Date.now();
+      console.log(`[Extract] Reconnected successfully`);
+      return true;
+    } else {
+      console.log(`[Extract] Reconnection failed: ${result.error}`);
+      return false;
     }
-    
-    // Update activity timestamp
-    session.lastActivity = Date.now();
-    
-    // Check if connection is still healthy
-    if (!session.connector.isConnected()) {
-      console.log(`[Extract] Connection lost, attempting reconnect...`);
-      const imapSettings = getIMAPSettings(session.provider);
-      const result = await session.connector.connect({
-        email: session.email,
-        password: session.password,
-        host: imapSettings.host,
-        port: imapSettings.port,
-        tls: imapSettings.tls,
-      });
-
-      if (result.success && result.connection) {
-        session.connection = result.connection;
-        console.log(`[Extract] Reconnected successfully`);
-        return true;
-      } else {
-        console.log(`[Extract] Reconnection failed: ${result.error}`);
-        return false;
-      }
-    }
-    
-    return true;
   };
 
   try {
-    console.log('[Extract] Counting emails...');
-    keepAlive();
-    const totalCount = await fetcher.count(session.connection, fetchFilter);
-    console.log(`[Extract] Found ${totalCount} emails`);
+    // Step 1: Get all matching UIDs first
+    console.log('[Extract] Getting matching UIDs...');
+    session.lastActivity = Date.now();
+    
+    let allUIDs: number[];
+    try {
+      allUIDs = await fetcher.getMatchingUIDs(session.connection, fetchFilter);
+    } catch (error) {
+      // Try reconnect and retry
+      console.log('[Extract] Failed to get UIDs, attempting reconnect...');
+      if (await reconnect()) {
+        allUIDs = await fetcher.getMatchingUIDs(session.connection, fetchFilter);
+      } else {
+        throw new Error('Failed to get email list: connection lost');
+      }
+    }
+    
+    const totalCount = allUIDs.length;
+    console.log(`[Extract] Found ${totalCount} emails to process`);
     
     const results: ExtractionResult[] = [];
     let processed = 0;
     let errors = 0;
     let totalMatches = 0;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 3;
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Transfer-Encoding', 'chunked');
@@ -813,84 +818,108 @@ app.post('/api/extract', async (req, res) => {
       return;
     }
 
-    console.log('[Extract] Starting email processing...');
+    console.log('[Extract] Starting batch processing...');
     
-    // Process emails with connection health checks
-    let lastHealthCheck = Date.now();
-    const healthCheckInterval = 30000; // Check every 30 seconds
+    // Step 2: Process emails in batches with auto-reconnect
+    const batchSize = 20; // Smaller batches for better reliability
+    const maxReconnectAttempts = 5;
+    let reconnectAttempts = 0;
     
-    for await (const rawEmail of fetcher.fetch(session.connection, fetchFilter)) {
-      try {
-        // Keep connection alive
-        keepAlive();
-        
-        // Periodic health check (every 30 seconds or every EXTRACTION_BATCH_SIZE emails)
-        const now = Date.now();
-        if (now - lastHealthCheck > healthCheckInterval || processed % EXTRACTION_BATCH_SIZE === 0) {
-          lastHealthCheck = now;
+    for (let i = 0; i < allUIDs.length; i += batchSize) {
+      const batchUIDs = allUIDs.slice(i, i + batchSize);
+      const batchStart = i;
+      const batchEnd = Math.min(i + batchSize, allUIDs.length);
+      
+      console.log(`[Extract] Processing batch ${Math.floor(i / batchSize) + 1}: UIDs ${batchStart + 1}-${batchEnd} of ${totalCount}`);
+      
+      let batchEmails: any[] = [];
+      let fetchSuccess = false;
+      
+      // Try to fetch batch with retry
+      for (let attempt = 0; attempt < 3 && !fetchSuccess; attempt++) {
+        try {
+          session.lastActivity = Date.now();
+          batchEmails = await fetcher.fetchByUIDs(session.connection, fetchFilter.folder || 'INBOX', batchUIDs);
+          fetchSuccess = true;
+          reconnectAttempts = 0; // Reset on success
+        } catch (error) {
+          console.error(`[Extract] Batch fetch attempt ${attempt + 1} failed:`, error);
           
-          // Check connection health
-          if (!await ensureConnection()) {
-            if (reconnectAttempts >= maxReconnectAttempts) {
-              throw new Error('Connection lost and max reconnect attempts reached');
-            }
+          if (attempt < 2) {
+            // Try to reconnect
             reconnectAttempts++;
-            console.log(`[Extract] Reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
-            
-            // Wait a bit before continuing
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            if (!await ensureConnection()) {
-              throw new Error('Failed to reconnect after multiple attempts');
+            if (reconnectAttempts > maxReconnectAttempts) {
+              throw new Error(`Max reconnect attempts (${maxReconnectAttempts}) reached`);
             }
-          }
-          
-          // Send keepalive message to client
-          if (processed > 0 && processed % EXTRACTION_BATCH_SIZE === 0) {
-            console.log(`[Extract] Processed ${processed}/${totalCount} emails, connection healthy`);
+            
+            console.log(`[Extract] Reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
+            if (!await reconnect()) {
+              throw new Error('Failed to reconnect to mail server');
+            }
           }
         }
-        
-        console.log(`[Extract] Processing email ${processed + 1}/${totalCount}: ${rawEmail.subject?.substring(0, 50)}...`);
-        
-        const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
-        const result = extractor.extract(parsed, extractionPattern, stripHtml);
-        results.push(result);
-        
-        const matchCount = result.matches.length;
-        totalMatches += matchCount;
-        
-        console.log(`[Extract] Email ${processed + 1}: ${matchCount} matches found`);
-        
-        res.write(JSON.stringify({ 
-          type: 'progress', 
-          processed: processed + 1, 
-          total: totalCount,
-          matches: result.matches.map(m => ({
-            fullMatch: m.fullMatch,
-            groups: m.groups,
-            subject: result.email.subject,
-            from: result.email.from,
-            date: result.email.date
-          }))
-        }) + '\n');
-        
-        // Reset reconnect attempts on successful processing
-        reconnectAttempts = 0;
-        
-      } catch (error) {
-        errors++;
-        console.error(`[Extract] Error processing email ${processed + 1}:`, error);
-        res.write(JSON.stringify({ 
-          type: 'progress', 
-          processed: processed + 1, 
-          total: totalCount,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        }) + '\n');
       }
-      processed++;
       
-      if (delayMs > 0) {
+      if (!fetchSuccess) {
+        // Mark all UIDs in this batch as errors
+        for (const uid of batchUIDs) {
+          errors++;
+          processed++;
+          res.write(JSON.stringify({ 
+            type: 'progress', 
+            processed, 
+            total: totalCount,
+            error: 'Failed to fetch email after multiple attempts'
+          }) + '\n');
+        }
+        continue;
+      }
+      
+      // Process each email in the batch
+      for (const rawEmail of batchEmails) {
+        try {
+          const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
+          const result = extractor.extract(parsed, extractionPattern, stripHtml);
+          results.push(result);
+          
+          const matchCount = result.matches.length;
+          totalMatches += matchCount;
+          
+          processed++;
+          
+          res.write(JSON.stringify({ 
+            type: 'progress', 
+            processed, 
+            total: totalCount,
+            matches: result.matches.map(m => ({
+              fullMatch: m.fullMatch,
+              groups: m.groups,
+              subject: result.email.subject,
+              from: result.email.from,
+              date: result.email.date
+            }))
+          }) + '\n');
+          
+        } catch (error) {
+          errors++;
+          processed++;
+          console.error(`[Extract] Error processing email:`, error);
+          res.write(JSON.stringify({ 
+            type: 'progress', 
+            processed, 
+            total: totalCount,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          }) + '\n');
+        }
+      }
+      
+      // Log progress every few batches
+      if ((i / batchSize) % 5 === 0) {
+        console.log(`[Extract] Progress: ${processed}/${totalCount} emails, ${totalMatches} matches, ${errors} errors`);
+      }
+      
+      // Delay between batches
+      if (delayMs > 0 && i + batchSize < allUIDs.length) {
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     }
