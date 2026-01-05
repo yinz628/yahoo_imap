@@ -1782,7 +1782,7 @@ app.post('/api/emails/conversations', async (req, res) => {
 
 /**
  * POST /api/emails/batch-delete - Delete multiple emails by UID
- * Moves emails to Trash folder
+ * Moves emails to Trash folder with streaming progress
  * Requirements: 6.5
  */
 app.post('/api/emails/batch-delete', async (req, res) => {
@@ -1797,8 +1797,12 @@ app.post('/api/emails/batch-delete', async (req, res) => {
     return res.status(400).json({ error: 'UIDs array is required' });
   }
 
+  // Use streaming response for large deletions
+  const totalCount = uids.length;
+  const useStreaming = totalCount > 100;
+
   try {
-    console.log(`[BatchDelete] Deleting ${uids.length} emails from ${folder}`);
+    console.log(`[BatchDelete] Deleting ${totalCount} emails from ${folder}, streaming: ${useStreaming}`);
     
     const connection = session.connection;
     
@@ -1816,6 +1820,13 @@ app.post('/api/emails/batch-delete', async (req, res) => {
     
     let deleted = 0;
     let errors = 0;
+
+    if (useStreaming) {
+      // Streaming mode for large deletions
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Transfer-Encoding', 'chunked');
+      res.write(JSON.stringify({ type: 'init', total: totalCount }) + '\n');
+    }
     
     try {
       // Process in batches of 50 to avoid timeout
@@ -1829,9 +1840,33 @@ app.post('/api/emails/batch-delete', async (req, res) => {
           await connection.messageMove(range, trashFolder, { uid: true });
           console.log(`[BatchDelete] Moved ${batch.length} emails to ${trashFolder}`);
           deleted += batch.length;
+          
+          if (useStreaming) {
+            res.write(JSON.stringify({ 
+              type: 'progress', 
+              deleted, 
+              total: totalCount,
+              percent: Math.round((deleted / totalCount) * 100)
+            }) + '\n');
+          }
         } catch (error) {
           console.error(`[BatchDelete] Error deleting batch: ${error instanceof Error ? error.message : 'Unknown'}`);
           errors += batch.length;
+          
+          if (useStreaming) {
+            res.write(JSON.stringify({ 
+              type: 'progress', 
+              deleted, 
+              errors,
+              total: totalCount,
+              error: error instanceof Error ? error.message : 'Unknown'
+            }) + '\n');
+          }
+        }
+        
+        // Small delay between batches to prevent overwhelming the server
+        if (i + batchSize < uids.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
     } finally {
@@ -1840,15 +1875,27 @@ app.post('/api/emails/batch-delete', async (req, res) => {
     
     console.log(`[BatchDelete] Deleted ${deleted} emails, ${errors} errors`);
     
-    res.json({
+    const result = {
       success: true,
       deleted,
       errors,
       message: `成功删除 ${deleted} 封邮件${errors > 0 ? `，${errors} 封失败` : ''}`
-    });
+    };
+
+    if (useStreaming) {
+      res.write(JSON.stringify({ type: 'complete', ...result }) + '\n');
+      res.end();
+    } else {
+      res.json(result);
+    }
   } catch (error) {
     console.error('[BatchDelete] Error:', error);
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    if (useStreaming) {
+      res.write(JSON.stringify({ type: 'error', error: error instanceof Error ? error.message : 'Unknown error' }) + '\n');
+      res.end();
+    } else {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    }
   }
 });
 
