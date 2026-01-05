@@ -5201,6 +5201,7 @@
 
     // Store previous matches for resume functionality
     let previousMatches = [];
+    let previousExtractedResults = [];
 
     async function extract(isResume = false) {
       const pattern = document.getElementById('pattern').value;
@@ -5227,7 +5228,11 @@
         document.getElementById('matchesList').innerHTML = '';
         document.getElementById('results').innerHTML = '';
         previousMatches = [];
+        previousExtractedResults = [];
         extractedResults = [];
+      } else {
+        // In resume mode, save current results for merging later
+        previousExtractedResults = [...extractedResults];
       }
       
       document.getElementById('progressBar').style.width = '0%';
@@ -5363,15 +5368,22 @@
                     }
                   }
                 } else if (data.type === 'complete') {
-                  extractedResults = data.results;
+                  // Convert all matches to results format
+                  const currentResults = convertMatchesToResults(matchesList);
+                  extractedResults = currentResults;
+                  
                   const totalProcessed = skippedCount + data.processed;
                   showStatus('extractStatus', 
                     `✅ 完成！处理 ${data.processed} 封邮件${skippedCount > 0 ? ` (跳过 ${skippedCount})` : ''}，共提取 ${totalMatches} 个匹配项，${data.errors} 个错误`, 
                     'success');
-                  renderResults(data.results);
-                  // Reset skip count and previous matches after successful completion
+                  
+                  // Render results
+                  renderResults(currentResults);
+                  
+                  // Reset skip count and previous data after successful completion
                   document.getElementById('skipCount').value = '0';
                   previousMatches = [];
+                  previousExtractedResults = [];
                 } else if (data.type === 'error') {
                   showStatus('extractStatus', '❌ 错误: ' + data.error, 'error');
                 }
@@ -5394,6 +5406,11 @@
             // Save current matches for resume
             previousMatches = matchesList;
             
+            // Convert matches to results format and save for resume
+            const currentResults = convertMatchesToResults(matchesList);
+            previousExtractedResults = currentResults;
+            extractedResults = currentResults;
+            
             // Check if this might be Gmail bandwidth limit
             const isGmailLimit = totalProcessedSoFar > 2000;
             
@@ -5407,6 +5424,9 @@
             errorMsg += `✅ 已保存当前结果，可使用下方按钮重新连接并继续提取。`;
             
             showStatus('extractStatus', errorMsg, 'error');
+            
+            // Render current results so user can see/export them
+            renderResults(currentResults);
             
             // Show resume buttons
             showResumeButtons();
@@ -5538,6 +5558,32 @@
     // Hide resume buttons
     function hideResumeButtons() {
       document.getElementById('resumeButtons').style.display = 'none';
+    }
+
+    // Convert flat matches list to results format for renderResults
+    function convertMatchesToResults(matchesList) {
+      // Group matches by email (using subject + from + date as key)
+      const emailMap = new Map();
+      
+      matchesList.forEach(match => {
+        const key = `${match.subject}|${match.from}|${match.date}`;
+        if (!emailMap.has(key)) {
+          emailMap.set(key, {
+            email: {
+              subject: match.subject,
+              from: match.from,
+              date: match.date
+            },
+            matches: []
+          });
+        }
+        emailMap.get(key).matches.push({
+          fullMatch: match.fullMatch,
+          groups: match.groups || {}
+        });
+      });
+      
+      return Array.from(emailMap.values());
     }
 
     function renderResults(results) {
