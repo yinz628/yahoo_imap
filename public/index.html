@@ -1911,6 +1911,15 @@
                 </div>
                 <small style="color:#666;">值越大，提取越慢，CPU 占用越低。建议 100-500ms</small>
               </div>
+              <div class="form-group" style="margin-top:15px;">
+                <label>跳过已处理邮件（断点续传）</label>
+                <div style="display:flex; gap:10px; align-items:center;">
+                  <input type="number" id="skipCount" min="0" value="0" style="width:100px;">
+                  <span style="color:#666; font-size:13px;">封邮件</span>
+                  <button type="button" onclick="document.getElementById('skipCount').value='0'" style="padding:4px 8px; font-size:12px; background:#666;">重置</button>
+                </div>
+                <small style="color:#666;">如果上次提取中断，可以输入已处理的邮件数，从断点继续</small>
+              </div>
               <br>
               <button id="extractBtn" onclick="extract()" disabled style="opacity:0.5; cursor:not-allowed;">🚀 开始提取</button>
               <small id="extractBtnHint" style="color:#999; margin-left:10px;">请先选择或创建一个规则</small>
@@ -5203,6 +5212,8 @@
       document.getElementById('progressText').textContent = '准备中...';
       extractedResults = [];
       
+      const skipCount = parseInt(document.getElementById('skipCount').value) || 0;
+      
       try {
         const delayMs = parseInt(document.getElementById('delayMs').value) || 100;
         // Use apiRequest for streaming endpoint
@@ -5217,7 +5228,8 @@
               flags: document.getElementById('patternFlags').value
             },
             stripHtml: document.getElementById('stripHtml').checked,
-            delayMs: delayMs
+            delayMs: delayMs,
+            skipCount: skipCount
           })
         });
         
@@ -5234,6 +5246,8 @@
         const decoder = new TextDecoder();
         let buffer = '';
         let totalEmails = 0;
+        let originalTotal = 0;
+        let skippedCount = 0;
         let totalMatches = 0;
         let matchesList = [];
         let lastProcessed = 0;
@@ -5255,13 +5269,24 @@
                 
                 if (data.type === 'init') {
                   totalEmails = data.total;
-                  document.getElementById('progressText').textContent = `0 / ${totalEmails}`;
+                  originalTotal = data.originalTotal || data.total;
+                  skippedCount = data.skipped || 0;
+                  if (skippedCount > 0) {
+                    document.getElementById('progressText').textContent = `0 / ${totalEmails} (跳过 ${skippedCount})`;
+                    showStatus('extractStatus', `正在提取... 跳过前 ${skippedCount} 封，处理剩余 ${totalEmails} 封`, 'info');
+                  } else {
+                    document.getElementById('progressText').textContent = `0 / ${totalEmails}`;
+                  }
                 } else if (data.type === 'progress') {
                   lastProcessed = data.processed;
                   const percent = Math.round((data.processed / totalEmails) * 100);
                   document.getElementById('progressBar').style.width = percent + '%';
                   document.getElementById('progressPercent').textContent = percent + '%';
-                  document.getElementById('progressText').textContent = `${data.processed} / ${totalEmails}`;
+                  if (skippedCount > 0) {
+                    document.getElementById('progressText').textContent = `${data.processed} / ${totalEmails} (跳过 ${skippedCount})`;
+                  } else {
+                    document.getElementById('progressText').textContent = `${data.processed} / ${totalEmails}`;
+                  }
                   
                   if (data.matches && data.matches.length > 0) {
                     // Deduplicate matches (case-insensitive)
@@ -5293,10 +5318,13 @@
                   }
                 } else if (data.type === 'complete') {
                   extractedResults = data.results;
+                  const totalProcessed = skippedCount + data.processed;
                   showStatus('extractStatus', 
-                    `✅ 完成！处理 ${data.processed} 封邮件，提取 ${totalMatches} 个匹配项，${data.errors} 个错误`, 
+                    `✅ 完成！处理 ${data.processed} 封邮件${skippedCount > 0 ? ` (跳过 ${skippedCount})` : ''}，提取 ${totalMatches} 个匹配项，${data.errors} 个错误`, 
                     'success');
                   renderResults(data.results);
+                  // Reset skip count after successful completion
+                  document.getElementById('skipCount').value = '0';
                 } else if (data.type === 'error') {
                   showStatus('extractStatus', '❌ 错误: ' + data.error, 'error');
                 }
@@ -5310,12 +5338,25 @@
           console.error('Stream error:', streamError);
           
           if (lastProcessed > 0) {
-            // Partial progress was made
-            showStatus('extractStatus', 
-              `⚠️ 连接中断！已处理 ${lastProcessed}/${totalEmails} 封邮件，提取 ${totalMatches} 个匹配项。\n` +
-              `可能原因：网络不稳定、服务器超时或邮箱连接断开。\n` +
-              `建议：1) 检查网络连接 2) 减少邮件数量（使用日期筛选）3) 增加延迟时间`, 
-              'error');
+            // Calculate total processed including skipped
+            const totalProcessedSoFar = skippedCount + lastProcessed;
+            
+            // Auto-set skip count for resume
+            document.getElementById('skipCount').value = totalProcessedSoFar.toString();
+            
+            // Check if this might be Gmail bandwidth limit
+            const isGmailLimit = totalProcessedSoFar > 2000;
+            
+            let errorMsg = `⚠️ 连接中断！已处理 ${lastProcessed}/${totalEmails} 封邮件${skippedCount > 0 ? ` (跳过 ${skippedCount})` : ''}，提取 ${totalMatches} 个匹配项。\n\n`;
+            
+            if (isGmailLimit) {
+              errorMsg += `🔴 可能触发了 Gmail IMAP 带宽限制（每天 2500MB）\n`;
+              errorMsg += `Gmail 会在 1-24 小时后自动解除限制。\n\n`;
+            }
+            
+            errorMsg += `✅ 已自动设置跳过数为 ${totalProcessedSoFar}，等待后可点击"开始提取"继续。`;
+            
+            showStatus('extractStatus', errorMsg, 'error');
           } else {
             throw streamError;
           }
@@ -5333,6 +5374,10 @@
             '建议：检查服务器状态，或使用日期筛选减少邮件数量';
         } else if (errorMsg.includes('Not connected')) {
           errorMsg = '邮箱连接已断开。请返回邮箱管理重新连接。';
+        } else if (errorMsg.toLowerCase().includes('bandwidth')) {
+          errorMsg = '触发了 Gmail IMAP 带宽限制。\n' +
+            'Gmail 每天限制 IMAP 下载 2500MB。\n' +
+            '请等待 1-24 小时后再试。';
         }
         
         showStatus('extractStatus', '❌ 提取失败: ' + errorMsg, 'error');

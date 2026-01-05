@@ -718,7 +718,7 @@ app.post('/api/preview', async (req, res) => {
 
 // Extract endpoint - batch processing with auto-reconnect and resume capability
 app.post('/api/extract', async (req, res) => {
-  const { sessionId, filter, pattern, stripHtml, delayMs = 100 } = req.body;
+  const { sessionId, filter, pattern, stripHtml, delayMs = 100, skipCount = 0 } = req.body;
   let session = await ensureSessionConnected(sessionId);
   
   if (!session) {
@@ -745,7 +745,7 @@ app.post('/api/extract', async (req, res) => {
 
   console.log(`[Extract] Starting extraction with pattern: ${pattern.pattern}`);
   console.log(`[Extract] Filter: ${JSON.stringify(fetchFilter)}`);
-  console.log(`[Extract] Delay: ${delayMs}ms, StripHtml: ${stripHtml}`);
+  console.log(`[Extract] Delay: ${delayMs}ms, StripHtml: ${stripHtml}, Skip: ${skipCount}`);
 
   // Helper function to reconnect
   const reconnect = async (): Promise<boolean> => {
@@ -799,9 +799,16 @@ app.post('/api/extract', async (req, res) => {
       }
     }
     
-    const totalCount = allUIDs.length;
-    console.log(`[Extract] Found ${totalCount} emails to process`);
+    const originalTotal = allUIDs.length;
+    console.log(`[Extract] Found ${originalTotal} emails total`);
     
+    // Apply skip if specified (for resume functionality)
+    if (skipCount > 0 && skipCount < allUIDs.length) {
+      allUIDs = allUIDs.slice(skipCount);
+      console.log(`[Extract] Skipping first ${skipCount} emails, processing remaining ${allUIDs.length}`);
+    }
+    
+    const totalCount = allUIDs.length;
     const results: ExtractionResult[] = [];
     let processed = 0;
     let errors = 0;
@@ -809,7 +816,7 @@ app.post('/api/extract', async (req, res) => {
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Transfer-Encoding', 'chunked');
-    res.write(JSON.stringify({ type: 'init', total: totalCount }) + '\n');
+    res.write(JSON.stringify({ type: 'init', total: totalCount, originalTotal, skipped: skipCount }) + '\n');
 
     if (totalCount === 0) {
       console.log('[Extract] No emails to process');
