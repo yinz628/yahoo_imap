@@ -110,8 +110,10 @@ const connections = new Map<string, ConnectionSession>();
 
 // Connection health check interval (every 2 minutes)
 const HEALTH_CHECK_INTERVAL = 120000;
-// Connection idle timeout (10 minutes)
-const CONNECTION_IDLE_TIMEOUT = 600000;
+// Connection idle timeout (30 minutes for long extractions)
+const CONNECTION_IDLE_TIMEOUT = 1800000;
+// Batch size for extraction (check connection health every N emails)
+const EXTRACTION_BATCH_SIZE = 100;
 
 // Periodic health check for all connections
 setInterval(async () => {
@@ -717,7 +719,7 @@ app.post('/api/preview', async (req, res) => {
 // Extract endpoint - single-threaded with speed control and progress streaming
 app.post('/api/extract', async (req, res) => {
   const { sessionId, filter, pattern, stripHtml, delayMs = 100 } = req.body;
-  const session = await ensureSessionConnected(sessionId);
+  let session = await ensureSessionConnected(sessionId);
   
   if (!session) {
     return res.status(400).json({ error: 'Not connected' });
@@ -745,8 +747,51 @@ app.post('/api/extract', async (req, res) => {
   console.log(`[Extract] Filter: ${JSON.stringify(fetchFilter)}`);
   console.log(`[Extract] Delay: ${delayMs}ms, StripHtml: ${stripHtml}`);
 
+  // Helper function to keep connection alive
+  const keepAlive = () => {
+    if (session) {
+      session.lastActivity = Date.now();
+    }
+  };
+
+  // Helper function to check and reconnect if needed
+  const ensureConnection = async (): Promise<boolean> => {
+    if (!session) {
+      session = await ensureSessionConnected(sessionId);
+      return session !== null;
+    }
+    
+    // Update activity timestamp
+    session.lastActivity = Date.now();
+    
+    // Check if connection is still healthy
+    if (!session.connector.isConnected()) {
+      console.log(`[Extract] Connection lost, attempting reconnect...`);
+      const imapSettings = getIMAPSettings(session.provider);
+      const result = await session.connector.connect({
+        email: session.email,
+        password: session.password,
+        host: imapSettings.host,
+        port: imapSettings.port,
+        tls: imapSettings.tls,
+      });
+
+      if (result.success && result.connection) {
+        session.connection = result.connection;
+        console.log(`[Extract] Reconnected successfully`);
+        return true;
+      } else {
+        console.log(`[Extract] Reconnection failed: ${result.error}`);
+        return false;
+      }
+    }
+    
+    return true;
+  };
+
   try {
     console.log('[Extract] Counting emails...');
+    keepAlive();
     const totalCount = await fetcher.count(session.connection, fetchFilter);
     console.log(`[Extract] Found ${totalCount} emails`);
     
@@ -754,6 +799,8 @@ app.post('/api/extract', async (req, res) => {
     let processed = 0;
     let errors = 0;
     let totalMatches = 0;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 3;
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Transfer-Encoding', 'chunked');
@@ -767,8 +814,43 @@ app.post('/api/extract', async (req, res) => {
     }
 
     console.log('[Extract] Starting email processing...');
+    
+    // Process emails with connection health checks
+    let lastHealthCheck = Date.now();
+    const healthCheckInterval = 30000; // Check every 30 seconds
+    
     for await (const rawEmail of fetcher.fetch(session.connection, fetchFilter)) {
       try {
+        // Keep connection alive
+        keepAlive();
+        
+        // Periodic health check (every 30 seconds or every EXTRACTION_BATCH_SIZE emails)
+        const now = Date.now();
+        if (now - lastHealthCheck > healthCheckInterval || processed % EXTRACTION_BATCH_SIZE === 0) {
+          lastHealthCheck = now;
+          
+          // Check connection health
+          if (!await ensureConnection()) {
+            if (reconnectAttempts >= maxReconnectAttempts) {
+              throw new Error('Connection lost and max reconnect attempts reached');
+            }
+            reconnectAttempts++;
+            console.log(`[Extract] Reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
+            
+            // Wait a bit before continuing
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            if (!await ensureConnection()) {
+              throw new Error('Failed to reconnect after multiple attempts');
+            }
+          }
+          
+          // Send keepalive message to client
+          if (processed > 0 && processed % EXTRACTION_BATCH_SIZE === 0) {
+            console.log(`[Extract] Processed ${processed}/${totalCount} emails, connection healthy`);
+          }
+        }
+        
         console.log(`[Extract] Processing email ${processed + 1}/${totalCount}: ${rawEmail.subject?.substring(0, 50)}...`);
         
         const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
@@ -792,6 +874,10 @@ app.post('/api/extract', async (req, res) => {
             date: result.email.date
           }))
         }) + '\n');
+        
+        // Reset reconnect attempts on successful processing
+        reconnectAttempts = 0;
+        
       } catch (error) {
         errors++;
         console.error(`[Extract] Error processing email ${processed + 1}:`, error);
