@@ -1245,9 +1245,14 @@ app.post('/api/delete', async (req, res) => {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Transfer-Encoding', 'chunked');
       
+      // Send init message
+      const initMsg = { type: 'init', total: uids.length };
+      res.write(JSON.stringify(initMsg) + '\n');
+      
       // Delete emails with progress callback
       const result = await deleter.deleteEmails(session.connection, fetchFilter, (deleted, total) => {
-        const progress = { type: 'progress', deleted, total };
+        const percent = Math.round((deleted / total) * 100);
+        const progress = { type: 'progress', deleted, total, percent };
         res.write(JSON.stringify(progress) + '\n');
       });
       
@@ -2247,6 +2252,10 @@ app.post('/api/emails/move', async (req, res) => {
     if (useStreaming) {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Transfer-Encoding', 'chunked');
+      
+      // Send init message
+      const initMsg = { type: 'init', total: totalCount };
+      res.write(JSON.stringify(initMsg) + '\n');
     }
     
     const connection = session.connection;
@@ -2271,7 +2280,8 @@ app.post('/api/emails/move', async (req, res) => {
           
           // Send progress update for streaming
           if (useStreaming) {
-            const progress = { type: 'progress', moved, total: totalCount };
+            const percent = Math.round((moved / totalCount) * 100);
+            const progress = { type: 'progress', moved, total: totalCount, percent };
             res.write(JSON.stringify(progress) + '\n');
           }
         } catch (error) {

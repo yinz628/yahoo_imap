@@ -4100,6 +4100,7 @@
       }
       
       const btnConfirm = document.getElementById('btnConfirmMove');
+      const statusEl = document.getElementById('emailListStatus');
       btnConfirm.disabled = true;
       btnConfirm.textContent = '移动中...';
       
@@ -4136,9 +4137,12 @@
               try {
                 const data = JSON.parse(line);
                 
-                if (data.type === 'progress') {
-                  const percent = Math.round((data.moved / data.total) * 100);
-                  btnConfirm.textContent = `正在移动 ${data.moved}/${data.total} (${percent}%)...`;
+                if (data.type === 'init') {
+                  statusEl.textContent = `正在移动 0/${data.total}...`;
+                  btnConfirm.textContent = `正在移动 0/${data.total}...`;
+                } else if (data.type === 'progress') {
+                  statusEl.textContent = `正在移动 ${data.moved}/${data.total} (${data.percent}%)...`;
+                  btnConfirm.textContent = `正在移动 ${data.moved}/${data.total} (${data.percent}%)...`;
                 } else if (data.type === 'complete') {
                   finalResult = data;
                 }
@@ -5963,9 +5967,10 @@
               try {
                 const data = JSON.parse(line);
                 
-                if (data.type === 'progress') {
-                  const percent = Math.round((data.deleted / data.total) * 100);
-                  managementResult.textContent = `正在删除 ${data.deleted}/${data.total} (${percent}%)...`;
+                if (data.type === 'init') {
+                  managementResult.textContent = `正在删除 0/${data.total}...`;
+                } else if (data.type === 'progress') {
+                  managementResult.textContent = `正在删除 ${data.deleted}/${data.total} (${data.percent}%)...`;
                 } else if (data.type === 'complete') {
                   finalResult = data;
                 }
