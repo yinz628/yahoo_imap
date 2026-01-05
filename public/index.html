@@ -3415,13 +3415,13 @@
           
           // Check if any email in this conversation is selected
           const convEmails = conv.emails || [];
-          const convUids = convEmails.filter(e => e).map(e => e.uid);
+          const convUids = convEmails.filter(e => e && e.uid).map(e => e.uid);
           const selectedInConv = convUids.filter(uid => emailMgmtState.selectedUids.has(uid)).length;
           const allSelected = convUids.length > 0 && selectedInConv === convUids.length;
           
           // Build emails list HTML
           const emailsHtml = convEmails.map((email, emailIndex) => {
-            if (!email) return '';
+            if (!email || !email.uid) return '';
             
             const emailDate = email.date ? new Date(email.date) : new Date();
             const emailDateStr = emailDate.toLocaleDateString() + ' ' + emailDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
@@ -3454,7 +3454,7 @@
                 <div class="conversation-email-date">${escapeHtml(emailDateStr)}</div>
               </div>
             `;
-          }).join('');
+          }).filter(html => html).join('');
           
           const convSubject = conv.subject || '(无主题)';
           const emailCount = conv.emailCount || convEmails.length || 0;
@@ -3480,9 +3480,9 @@
               </div>
             </div>
           `;
-        }).join('');
+        }).filter(html => html).join('');
         
-        showConversationContainer(html);
+        showConversationContainer(html || '<div class="conversation-empty">此文件夹为空</div>');
       } catch (e) {
         console.error('[Conversations] Render error:', e);
         showConversationContainer(`<div class="conversation-empty" style="color:#dc3545;">❌ 渲染失败: ${escapeHtml(e.message)}</div>`);

@@ -1656,6 +1656,7 @@ app.post('/api/emails/conversations', async (req, res) => {
       }
       
       // Fetch all envelope data to group by conversation
+      // For large mailboxes, process in batches to avoid timeout
       const allEmails: Array<{
         uid: number;
         subject: string;
@@ -1665,35 +1666,53 @@ app.post('/api/emails/conversations', async (req, res) => {
         date: string;
       }> = [];
       
-      const range = allUids.join(',');
+      const batchSize = 500; // Process 500 emails at a time
+      const totalUids = allUids.length;
       
-      for await (const message of connection.fetch(range, {
-        uid: true,
-        envelope: true
-      }, { uid: true })) {
-        const envelope = message.envelope;
-        if (envelope) {
-          const fromAddr = envelope.from?.[0];
-          const toAddr = envelope.to?.[0];
-          const subject = envelope.subject || '';
-          
-          // Normalize subject by removing Re:, Fwd:, RE:, FW:, etc.
-          const normalizedSubject = subject
-            .replace(/^(Re|RE|Fwd|FWD|Fw|FW|回复|转发|答复):\s*/gi, '')
-            .replace(/^\[.*?\]\s*/, '') // Remove [tags]
-            .trim()
-            .toLowerCase();
-          
-          allEmails.push({
-            uid: message.uid,
-            subject,
-            normalizedSubject,
-            sender: fromAddr?.address || fromAddr?.name || '',
-            recipient: toAddr?.address || toAddr?.name || '',
-            date: envelope.date ? envelope.date.toISOString() : new Date().toISOString()
-          });
+      console.log(`[Conversations] Processing ${totalUids} emails in batches of ${batchSize}`);
+      
+      for (let i = 0; i < totalUids; i += batchSize) {
+        const batchUids = allUids.slice(i, i + batchSize);
+        const range = batchUids.join(',');
+        
+        try {
+          for await (const message of connection.fetch(range, {
+            uid: true,
+            envelope: true
+          }, { uid: true })) {
+            const envelope = message.envelope;
+            if (envelope) {
+              const fromAddr = envelope.from?.[0];
+              const toAddr = envelope.to?.[0];
+              const subject = envelope.subject || '';
+              
+              // Normalize subject by removing Re:, Fwd:, RE:, FW:, etc.
+              const normalizedSubject = subject
+                .replace(/^(Re|RE|Fwd|FWD|Fw|FW|回复|转发|答复):\s*/gi, '')
+                .replace(/^\[.*?\]\s*/, '') // Remove [tags]
+                .trim()
+                .toLowerCase();
+              
+              allEmails.push({
+                uid: message.uid,
+                subject,
+                normalizedSubject,
+                sender: fromAddr?.address || fromAddr?.name || '',
+                recipient: toAddr?.address || toAddr?.name || '',
+                date: envelope.date ? envelope.date.toISOString() : new Date().toISOString()
+              });
+            }
+          }
+        } catch (batchError) {
+          console.error(`[Conversations] Error fetching batch ${i}-${i + batchSize}:`, batchError);
+          // Continue with next batch
         }
+        
+        // Update activity timestamp to prevent connection timeout
+        session.lastActivity = Date.now();
       }
+      
+      console.log(`[Conversations] Fetched ${allEmails.length} emails`);
       
       // Group emails by normalized subject
       const conversationMap = new Map<string, typeof allEmails>();
@@ -1716,33 +1735,33 @@ app.post('/api/emails/conversations', async (req, res) => {
         
         return {
           id: key,
-          subject: firstEmail.subject, // Use first email's subject as conversation title
+          subject: firstEmail?.subject || '(无主题)', // Use first email's subject as conversation title
           emailCount: emails.length,
-          latestDate: latestEmail.date,
-          firstEmail: {
+          latestDate: latestEmail?.date || new Date().toISOString(),
+          firstEmail: firstEmail ? {
             uid: firstEmail.uid,
             subject: firstEmail.subject,
             sender: firstEmail.sender,
             recipient: firstEmail.recipient,
             date: firstEmail.date
-          },
-          latestEmail: {
+          } : null,
+          latestEmail: latestEmail ? {
             uid: latestEmail.uid,
             subject: latestEmail.subject,
             sender: latestEmail.sender,
             recipient: latestEmail.recipient,
             date: latestEmail.date
-          },
-          participants: [...new Set(emails.map(e => e.sender))],
+          } : null,
+          participants: [...new Set(emails.map(e => e.sender).filter(Boolean))],
           emails: emails.map(e => ({
             uid: e.uid,
-            subject: e.subject,
-            sender: e.sender,
-            recipient: e.recipient,
+            subject: e.subject || '(无主题)',
+            sender: e.sender || '(未知)',
+            recipient: e.recipient || '',
             date: e.date
           }))
         };
-      });
+      }).filter(conv => conv.emails && conv.emails.length > 0); // Filter out empty conversations
       
       // Sort conversations by latest email date
       conversations.sort((a, b) => {
