@@ -1211,7 +1211,7 @@ app.post('/api/regex/validate', async (req, res) => {
   }
 });
 
-// Delete emails matching filter
+// Delete emails matching filter with streaming progress
 app.post('/api/delete', async (req, res) => {
   const { sessionId, filter } = req.body;
   const session = await ensureSessionConnected(sessionId);
@@ -1240,15 +1240,38 @@ app.post('/api/delete', async (req, res) => {
       return res.json({ deleted: 0, errors: 0, message: '没有找到匹配的邮件' });
     }
 
-    // Delete emails
-    const result = await deleter.deleteEmails(session.connection, fetchFilter);
-    console.log(`[Delete] Deleted ${result.deleted} emails, ${result.errors} errors`);
-    
-    res.json({
-      deleted: result.deleted,
-      errors: result.errors,
-      message: `成功删除 ${result.deleted} 封邮件${result.errors > 0 ? `，${result.errors} 封失败` : ''}`
-    });
+    // For large deletions (>100), use streaming response
+    if (uids.length > 100) {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Transfer-Encoding', 'chunked');
+      
+      // Delete emails with progress callback
+      const result = await deleter.deleteEmails(session.connection, fetchFilter, (deleted, total) => {
+        const progress = { type: 'progress', deleted, total };
+        res.write(JSON.stringify(progress) + '\n');
+      });
+      
+      console.log(`[Delete] Deleted ${result.deleted} emails, ${result.errors} errors`);
+      
+      const finalResult = {
+        type: 'complete',
+        deleted: result.deleted,
+        errors: result.errors,
+        message: `成功删除 ${result.deleted} 封邮件${result.errors > 0 ? `，${result.errors} 封失败` : ''}`
+      };
+      res.write(JSON.stringify(finalResult) + '\n');
+      res.end();
+    } else {
+      // For small deletions, use regular response
+      const result = await deleter.deleteEmails(session.connection, fetchFilter);
+      console.log(`[Delete] Deleted ${result.deleted} emails, ${result.errors} errors`);
+      
+      res.json({
+        deleted: result.deleted,
+        errors: result.errors,
+        message: `成功删除 ${result.deleted} 封邮件${result.errors > 0 ? `，${result.errors} 封失败` : ''}`
+      });
+    }
   } catch (error) {
     console.error('[Delete] Error:', error);
     res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
@@ -2196,7 +2219,7 @@ app.post('/api/folders/rename', async (req, res) => {
 });
 
 /**
- * POST /api/emails/move - Move emails to a different folder
+ * POST /api/emails/move - Move emails to a different folder with streaming progress
  */
 app.post('/api/emails/move', async (req, res) => {
   const { sessionId, sourceFolder = 'INBOX', targetFolder, uids } = req.body;
@@ -2214,8 +2237,17 @@ app.post('/api/emails/move', async (req, res) => {
     return res.status(400).json({ error: 'UIDs array is required' });
   }
 
+  const totalCount = uids.length;
+  const useStreaming = totalCount > 100;
+
   try {
-    console.log(`[EmailMove] Moving ${uids.length} emails from ${sourceFolder} to ${targetFolder}`);
+    console.log(`[EmailMove] Moving ${totalCount} emails from ${sourceFolder} to ${targetFolder}`);
+    
+    // For large moves, use streaming response
+    if (useStreaming) {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Transfer-Encoding', 'chunked');
+    }
     
     const connection = session.connection;
     
@@ -2236,6 +2268,12 @@ app.post('/api/emails/move', async (req, res) => {
           await connection.messageMove(range, targetFolder, { uid: true });
           moved += batch.length;
           console.log(`[EmailMove] Moved batch of ${batch.length} emails`);
+          
+          // Send progress update for streaming
+          if (useStreaming) {
+            const progress = { type: 'progress', moved, total: totalCount };
+            res.write(JSON.stringify(progress) + '\n');
+          }
         } catch (error) {
           console.error(`[EmailMove] Error moving batch: ${error instanceof Error ? error.message : 'Unknown'}`);
           errors += batch.length;
@@ -2247,12 +2285,24 @@ app.post('/api/emails/move', async (req, res) => {
     
     console.log(`[EmailMove] Moved ${moved} emails, ${errors} errors`);
     
-    res.json({
-      success: true,
-      moved,
-      errors,
-      message: `成功移动 ${moved} 封邮件${errors > 0 ? `，${errors} 封失败` : ''}`
-    });
+    if (useStreaming) {
+      const finalResult = {
+        type: 'complete',
+        success: true,
+        moved,
+        errors,
+        message: `成功移动 ${moved} 封邮件${errors > 0 ? `，${errors} 封失败` : ''}`
+      };
+      res.write(JSON.stringify(finalResult) + '\n');
+      res.end();
+    } else {
+      res.json({
+        success: true,
+        moved,
+        errors,
+        message: `成功移动 ${moved} 封邮件${errors > 0 ? `，${errors} 封失败` : ''}`
+      });
+    }
   } catch (error) {
     console.error('[EmailMove] Error:', error);
     res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
