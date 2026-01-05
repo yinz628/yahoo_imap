@@ -1929,6 +1929,17 @@
           <div class="card hidden" id="resultsCard">
             <h2>提取结果</h2>
             <div id="extractStatus"></div>
+            <!-- Resume buttons (hidden by default) -->
+            <div id="resumeButtons" style="display:none; margin:15px 0; padding:15px; background:#fff3e0; border-radius:6px; border:1px solid #ffcc80;">
+              <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                <button onclick="reconnectAndResume()" style="background:#ff9800; color:white;">🔄 重新连接</button>
+                <button onclick="continueExtract()" id="continueExtractBtn" style="background:#4caf50; color:white;" disabled>▶️ 继续提取</button>
+                <span id="resumeStatus" style="color:#666; font-size:13px;"></span>
+              </div>
+              <p style="margin:10px 0 0 0; font-size:12px; color:#666;">
+                💡 提示：点击"重新连接"后，等待连接成功，再点击"继续提取"从断点继续
+              </p>
+            </div>
             <div style="margin-bottom:15px;">
               <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
                 <span id="progressText">准备中...</span>
@@ -5205,6 +5216,9 @@
       document.getElementById('resultsCard').classList.remove('hidden');
       showStatus('extractStatus', '正在提取... 请稍候（单线程处理）', 'info');
       
+      // Hide resume buttons when starting new extraction
+      hideResumeButtons();
+      
       document.getElementById('matchesList').innerHTML = '';
       document.getElementById('results').innerHTML = '';
       document.getElementById('progressBar').style.width = '0%';
@@ -5354,9 +5368,12 @@
               errorMsg += `Gmail 会在 1-24 小时后自动解除限制。\n\n`;
             }
             
-            errorMsg += `✅ 已自动设置跳过数为 ${totalProcessedSoFar}，等待后可点击"开始提取"继续。`;
+            errorMsg += `✅ 已自动设置跳过数为 ${totalProcessedSoFar}，可使用下方按钮重新连接并继续提取。`;
             
             showStatus('extractStatus', errorMsg, 'error');
+            
+            // Show resume buttons
+            showResumeButtons();
           } else {
             throw streamError;
           }
@@ -5382,6 +5399,101 @@
         
         showStatus('extractStatus', '❌ 提取失败: ' + errorMsg, 'error');
       }
+    }
+
+    // Reconnect to mailbox for resume extraction
+    async function reconnectAndResume() {
+      const resumeStatus = document.getElementById('resumeStatus');
+      const continueBtn = document.getElementById('continueExtractBtn');
+      
+      resumeStatus.textContent = '正在重新连接...';
+      resumeStatus.style.color = '#ff9800';
+      continueBtn.disabled = true;
+      
+      try {
+        // Get current mailbox credentials
+        if (!currentMailboxId) {
+          throw new Error('没有选中的邮箱，请先在邮箱管理中选择一个邮箱');
+        }
+        
+        // Get password for the mailbox
+        const pwdRes = await apiRequest(`/api/mailboxes/${currentMailboxId}/password`);
+        const pwdData = await pwdRes.json();
+        
+        if (!pwdData.success) {
+          throw new Error('无法获取邮箱密码');
+        }
+        
+        // Disconnect existing session if any
+        if (sessionId) {
+          try {
+            await apiRequest('/api/disconnect', {
+              method: 'POST',
+              body: JSON.stringify({ sessionId })
+            });
+          } catch (e) {
+            // Ignore disconnect errors
+          }
+        }
+        
+        // Reconnect
+        const connectRes = await apiRequest('/api/connect', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: pwdData.email,
+            password: pwdData.password,
+            provider: currentProvider || 'gmail'
+          })
+        });
+        
+        const connectData = await connectRes.json();
+        
+        if (connectData.success) {
+          sessionId = connectData.sessionId;
+          folders = connectData.folders || [];
+          
+          resumeStatus.textContent = '✅ 连接成功！可以继续提取';
+          resumeStatus.style.color = '#4caf50';
+          continueBtn.disabled = false;
+          
+          // Update connection status in UI
+          updateConnectionStatus(true, pwdData.email);
+        } else {
+          throw new Error(connectData.error || '连接失败');
+        }
+      } catch (e) {
+        console.error('Reconnect error:', e);
+        resumeStatus.textContent = '❌ 连接失败: ' + e.message;
+        resumeStatus.style.color = '#f44336';
+        continueBtn.disabled = true;
+      }
+    }
+
+    // Continue extraction from where it left off
+    async function continueExtract() {
+      const skipCount = parseInt(document.getElementById('skipCount').value) || 0;
+      
+      if (skipCount === 0) {
+        alert('跳过数为 0，将从头开始提取。如需从断点继续，请确保跳过数已正确设置。');
+      }
+      
+      // Hide resume buttons
+      document.getElementById('resumeButtons').style.display = 'none';
+      
+      // Call extract function
+      await extract();
+    }
+
+    // Show resume buttons when extraction is interrupted
+    function showResumeButtons() {
+      document.getElementById('resumeButtons').style.display = 'block';
+      document.getElementById('resumeStatus').textContent = '';
+      document.getElementById('continueExtractBtn').disabled = true;
+    }
+
+    // Hide resume buttons
+    function hideResumeButtons() {
+      document.getElementById('resumeButtons').style.display = 'none';
     }
 
     function renderResults(results) {
