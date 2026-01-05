@@ -5221,80 +5221,121 @@
           })
         });
         
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(errorData.error || `HTTP ${res.status}`);
+        }
+        
+        if (!res.body) {
+          throw new Error('Response body is empty');
+        }
+        
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let totalEmails = 0;
         let totalMatches = 0;
         let matchesList = [];
+        let lastProcessed = 0;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (!line) continue;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
             
-            try {
-              const data = JSON.parse(line);
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (!line) continue;
               
-              if (data.type === 'init') {
-                totalEmails = data.total;
-                document.getElementById('progressText').textContent = `0 / ${totalEmails}`;
-              } else if (data.type === 'progress') {
-                const percent = Math.round((data.processed / totalEmails) * 100);
-                document.getElementById('progressBar').style.width = percent + '%';
-                document.getElementById('progressPercent').textContent = percent + '%';
-                document.getElementById('progressText').textContent = `${data.processed} / ${totalEmails}`;
+              try {
+                const data = JSON.parse(line);
                 
-                if (data.matches && data.matches.length > 0) {
-                  // Deduplicate matches (case-insensitive)
-                  const seenInBatch = new Set();
-                  const uniqueMatches = data.matches.filter(match => {
-                    const key = match.fullMatch.toLowerCase();
-                    if (seenInBatch.has(key)) {
-                      return false;
-                    }
-                    seenInBatch.add(key);
-                    return true;
-                  });
+                if (data.type === 'init') {
+                  totalEmails = data.total;
+                  document.getElementById('progressText').textContent = `0 / ${totalEmails}`;
+                } else if (data.type === 'progress') {
+                  lastProcessed = data.processed;
+                  const percent = Math.round((data.processed / totalEmails) * 100);
+                  document.getElementById('progressBar').style.width = percent + '%';
+                  document.getElementById('progressPercent').textContent = percent + '%';
+                  document.getElementById('progressText').textContent = `${data.processed} / ${totalEmails}`;
                   
-                  uniqueMatches.forEach(match => {
-                    totalMatches++;
-                    matchesList.push(match);
+                  if (data.matches && data.matches.length > 0) {
+                    // Deduplicate matches (case-insensitive)
+                    const seenInBatch = new Set();
+                    const uniqueMatches = data.matches.filter(match => {
+                      const key = match.fullMatch.toLowerCase();
+                      if (seenInBatch.has(key)) {
+                        return false;
+                      }
+                      seenInBatch.add(key);
+                      return true;
+                    });
                     
-                    const matchHtml = `
-                      <div style="padding:8px; margin:5px 0; background:white; border-radius:3px; border-left:3px solid #6001d2;">
-                        <strong style="color:#6001d2;">${escapeHtml(match.fullMatch)}</strong>
-                        <br><small style="color:#666;">📧 ${escapeHtml(match.subject)} | 👤 ${escapeHtml(match.from)}</small>
-                      </div>
-                    `;
-                    document.getElementById('matchesList').innerHTML += matchHtml;
-                    
-                    const matchesDiv = document.getElementById('liveMatches');
-                    matchesDiv.scrollTop = matchesDiv.scrollHeight;
-                  });
+                    uniqueMatches.forEach(match => {
+                      totalMatches++;
+                      matchesList.push(match);
+                      
+                      const matchHtml = `
+                        <div style="padding:8px; margin:5px 0; background:white; border-radius:3px; border-left:3px solid #6001d2;">
+                          <strong style="color:#6001d2;">${escapeHtml(match.fullMatch)}</strong>
+                          <br><small style="color:#666;">📧 ${escapeHtml(match.subject)} | 👤 ${escapeHtml(match.from)}</small>
+                        </div>
+                      `;
+                      document.getElementById('matchesList').innerHTML += matchHtml;
+                      
+                      const matchesDiv = document.getElementById('liveMatches');
+                      matchesDiv.scrollTop = matchesDiv.scrollHeight;
+                    });
+                  }
+                } else if (data.type === 'complete') {
+                  extractedResults = data.results;
+                  showStatus('extractStatus', 
+                    `✅ 完成！处理 ${data.processed} 封邮件，提取 ${totalMatches} 个匹配项，${data.errors} 个错误`, 
+                    'success');
+                  renderResults(data.results);
+                } else if (data.type === 'error') {
+                  showStatus('extractStatus', '❌ 错误: ' + data.error, 'error');
                 }
-              } else if (data.type === 'complete') {
-                extractedResults = data.results;
-                showStatus('extractStatus', 
-                  `✅ 完成！处理 ${data.processed} 封邮件，提取 ${totalMatches} 个匹配项，${data.errors} 个错误`, 
-                  'success');
-                renderResults(data.results);
-              } else if (data.type === 'error') {
-                showStatus('extractStatus', '❌ 错误: ' + data.error, 'error');
+              } catch (e) {
+                console.error('Parse error:', e);
               }
-            } catch (e) {
-              console.error('Parse error:', e);
             }
+          }
+        } catch (streamError) {
+          // Stream reading error - connection might have been lost
+          console.error('Stream error:', streamError);
+          
+          if (lastProcessed > 0) {
+            // Partial progress was made
+            showStatus('extractStatus', 
+              `⚠️ 连接中断！已处理 ${lastProcessed}/${totalEmails} 封邮件，提取 ${totalMatches} 个匹配项。\n` +
+              `可能原因：网络不稳定、服务器超时或邮箱连接断开。\n` +
+              `建议：1) 检查网络连接 2) 减少邮件数量（使用日期筛选）3) 增加延迟时间`, 
+              'error');
+          } else {
+            throw streamError;
           }
         }
       } catch (e) {
-        showStatus('extractStatus', '提取失败: ' + e.message, 'error');
+        console.error('Extract error:', e);
+        let errorMsg = e.message || 'Unknown error';
+        
+        // Provide more helpful error messages
+        if (errorMsg.toLowerCase().includes('network') || errorMsg.toLowerCase().includes('fetch')) {
+          errorMsg = '网络连接错误。可能原因：\n' +
+            '1) 服务器未运行或已崩溃\n' +
+            '2) 网络连接不稳定\n' +
+            '3) 请求超时（邮件数量过多）\n\n' +
+            '建议：检查服务器状态，或使用日期筛选减少邮件数量';
+        } else if (errorMsg.includes('Not connected')) {
+          errorMsg = '邮箱连接已断开。请返回邮箱管理重新连接。';
+        }
+        
+        showStatus('extractStatus', '❌ 提取失败: ' + errorMsg, 'error');
       }
     }
 
