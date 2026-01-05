@@ -5199,7 +5199,10 @@
 
     // ==================== Extraction Functions ====================
 
-    async function extract() {
+    // Store previous matches for resume functionality
+    let previousMatches = [];
+
+    async function extract(isResume = false) {
       const pattern = document.getElementById('pattern').value;
       if (!pattern) {
         alert('请输入正则表达式');
@@ -5214,17 +5217,22 @@
       }
 
       document.getElementById('resultsCard').classList.remove('hidden');
-      showStatus('extractStatus', '正在提取... 请稍候（单线程处理）', 'info');
+      showStatus('extractStatus', isResume ? '正在继续提取...' : '正在提取... 请稍候（单线程处理）', 'info');
       
-      // Hide resume buttons when starting new extraction
+      // Hide resume buttons when starting extraction
       hideResumeButtons();
       
-      document.getElementById('matchesList').innerHTML = '';
-      document.getElementById('results').innerHTML = '';
+      // Only clear results if not resuming
+      if (!isResume) {
+        document.getElementById('matchesList').innerHTML = '';
+        document.getElementById('results').innerHTML = '';
+        previousMatches = [];
+        extractedResults = [];
+      }
+      
       document.getElementById('progressBar').style.width = '0%';
       document.getElementById('progressPercent').textContent = '0%';
       document.getElementById('progressText').textContent = '准备中...';
-      extractedResults = [];
       
       const skipCount = parseInt(document.getElementById('skipCount').value) || 0;
       
@@ -5262,8 +5270,8 @@
         let totalEmails = 0;
         let originalTotal = 0;
         let skippedCount = 0;
-        let totalMatches = 0;
-        let matchesList = [];
+        let totalMatches = isResume ? previousMatches.length : 0;
+        let matchesList = isResume ? [...previousMatches] : [];
         let lastProcessed = 0;
 
         try {
@@ -5358,11 +5366,12 @@
                   extractedResults = data.results;
                   const totalProcessed = skippedCount + data.processed;
                   showStatus('extractStatus', 
-                    `✅ 完成！处理 ${data.processed} 封邮件${skippedCount > 0 ? ` (跳过 ${skippedCount})` : ''}，提取 ${totalMatches} 个匹配项，${data.errors} 个错误`, 
+                    `✅ 完成！处理 ${data.processed} 封邮件${skippedCount > 0 ? ` (跳过 ${skippedCount})` : ''}，共提取 ${totalMatches} 个匹配项，${data.errors} 个错误`, 
                     'success');
                   renderResults(data.results);
-                  // Reset skip count after successful completion
+                  // Reset skip count and previous matches after successful completion
                   document.getElementById('skipCount').value = '0';
+                  previousMatches = [];
                 } else if (data.type === 'error') {
                   showStatus('extractStatus', '❌ 错误: ' + data.error, 'error');
                 }
@@ -5382,6 +5391,9 @@
             // Auto-set skip count for resume
             document.getElementById('skipCount').value = totalProcessedSoFar.toString();
             
+            // Save current matches for resume
+            previousMatches = matchesList;
+            
             // Check if this might be Gmail bandwidth limit
             const isGmailLimit = totalProcessedSoFar > 2000;
             
@@ -5392,7 +5404,7 @@
               errorMsg += `Gmail 会在 1-24 小时后自动解除限制。\n\n`;
             }
             
-            errorMsg += `✅ 已自动设置跳过数为 ${totalProcessedSoFar}，可使用下方按钮重新连接并继续提取。`;
+            errorMsg += `✅ 已保存当前结果，可使用下方按钮重新连接并继续提取。`;
             
             showStatus('extractStatus', errorMsg, 'error');
             
@@ -5502,14 +5514,18 @@
       const skipCount = parseInt(document.getElementById('skipCount').value) || 0;
       
       if (skipCount === 0) {
-        alert('跳过数为 0，将从头开始提取。如需从断点继续，请确保跳过数已正确设置。');
+        if (!confirm('跳过数为 0，将从头开始提取并清空之前的结果。确定继续吗？')) {
+          return;
+        }
+        // Reset previous matches if starting from beginning
+        previousMatches = [];
       }
       
       // Hide resume buttons
       document.getElementById('resumeButtons').style.display = 'none';
       
-      // Call extract function
-      await extract();
+      // Call extract function with resume mode
+      await extract(skipCount > 0);
     }
 
     // Show resume buttons when extraction is interrupted
