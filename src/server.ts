@@ -1255,7 +1255,7 @@ app.post('/api/delete', async (req, res) => {
   }
 });
 
-// Empty trash folder
+// Empty trash folder with streaming progress
 app.post('/api/empty-trash', async (req, res) => {
   const { sessionId } = req.body;
   const session = await ensureSessionConnected(sessionId);
@@ -1269,23 +1269,109 @@ app.post('/api/empty-trash', async (req, res) => {
   try {
     console.log('[EmptyTrash] Starting...');
     
-    // First get count
-    const trashCount = await deleter.getTrashCount(session.connection);
-    console.log(`[EmptyTrash] Found ${trashCount} emails in Trash`);
+    // First get trash folder and count
+    const trashFolder = await deleter.getTrashFolderName(session.connection);
     
-    if (trashCount === 0) {
+    if (!trashFolder) {
+      return res.json({ deleted: 0, errors: 0, message: '未找到回收站文件夹' });
+    }
+    
+    const status = await session.connection.status(trashFolder, { messages: true });
+    const totalCount = status.messages || 0;
+    
+    console.log(`[EmptyTrash] Found ${totalCount} emails in Trash`);
+    
+    if (totalCount === 0) {
       return res.json({ deleted: 0, errors: 0, message: '回收站已经是空的' });
     }
 
-    // Empty trash
-    const result = await deleter.emptyTrash(session.connection);
-    console.log(`[EmptyTrash] Deleted ${result.deleted} emails, ${result.errors} errors`);
+    // Use streaming for large deletions
+    const useStreaming = totalCount > 100;
     
-    res.json({
-      deleted: result.deleted,
-      errors: result.errors,
-      message: `成功清空回收站，永久删除 ${result.deleted} 封邮件${result.errors > 0 ? `，${result.errors} 封失败` : ''}`
-    });
+    if (useStreaming) {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Transfer-Encoding', 'chunked');
+      res.write(JSON.stringify({ type: 'init', total: totalCount }) + '\n');
+    }
+
+    // Open Trash folder in write mode
+    await session.connection.mailboxOpen(trashFolder, { readOnly: false });
+
+    let deleted = 0;
+    let errors = 0;
+
+    try {
+      // Get all UIDs in Trash
+      const uids = await session.connection.search({}, { uid: true });
+      
+      if (uids === false || uids.length === 0) {
+        if (useStreaming) {
+          res.write(JSON.stringify({ type: 'complete', deleted: 0, errors: 0, message: '回收站已经是空的' }) + '\n');
+          res.end();
+        } else {
+          res.json({ deleted: 0, errors: 0, message: '回收站已经是空的' });
+        }
+        return;
+      }
+
+      // Process in batches
+      const batchSize = 50;
+      for (let i = 0; i < uids.length; i += batchSize) {
+        const batch = uids.slice(i, i + batchSize);
+        const range = batch.join(',');
+        
+        try {
+          // Permanently delete (EXPUNGE)
+          await session.connection.messageDelete(range, { uid: true });
+          deleted += batch.length;
+          console.log(`[EmptyTrash] Deleted ${deleted}/${totalCount}`);
+          
+          if (useStreaming) {
+            res.write(JSON.stringify({ 
+              type: 'progress', 
+              deleted, 
+              total: totalCount,
+              percent: Math.round((deleted / totalCount) * 100)
+            }) + '\n');
+          }
+        } catch (error) {
+          console.error(`[EmptyTrash] Error deleting batch: ${error instanceof Error ? error.message : 'Unknown'}`);
+          errors += batch.length;
+          
+          if (useStreaming) {
+            res.write(JSON.stringify({ 
+              type: 'progress', 
+              deleted, 
+              errors,
+              total: totalCount,
+              error: error instanceof Error ? error.message : 'Unknown'
+            }) + '\n');
+          }
+        }
+        
+        // Small delay between batches
+        if (i + batchSize < uids.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+    } finally {
+      await session.connection.mailboxClose();
+    }
+    
+    console.log(`[EmptyTrash] Deleted ${deleted} emails, ${errors} errors`);
+    
+    const result = {
+      deleted,
+      errors,
+      message: `成功清空回收站，永久删除 ${deleted} 封邮件${errors > 0 ? `，${errors} 封失败` : ''}`
+    };
+
+    if (useStreaming) {
+      res.write(JSON.stringify({ type: 'complete', ...result }) + '\n');
+      res.end();
+    } else {
+      res.json(result);
+    }
   } catch (error) {
     console.error('[EmptyTrash] Error:', error);
     res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
