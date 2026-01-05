@@ -5317,18 +5317,42 @@
                     uniqueMatches.forEach(match => {
                       totalMatches++;
                       matchesList.push(match);
-                      
-                      const matchHtml = `
-                        <div style="padding:8px; margin:5px 0; background:white; border-radius:3px; border-left:3px solid #6001d2;">
-                          <strong style="color:#6001d2;">${escapeHtml(match.fullMatch)}</strong>
-                          <br><small style="color:#666;">📧 ${escapeHtml(match.subject)} | 👤 ${escapeHtml(match.from)}</small>
-                        </div>
-                      `;
-                      document.getElementById('matchesList').innerHTML += matchHtml;
-                      
-                      const matchesDiv = document.getElementById('liveMatches');
-                      matchesDiv.scrollTop = matchesDiv.scrollHeight;
                     });
+                    
+                    // Performance optimization: batch DOM updates and limit displayed items
+                    const matchesListEl = document.getElementById('matchesList');
+                    const matchesDiv = document.getElementById('liveMatches');
+                    const maxDisplayed = 200; // Only show last 200 matches in real-time view
+                    
+                    // Only update DOM every 10 matches or when we have new matches
+                    if (totalMatches % 10 === 0 || uniqueMatches.length > 0) {
+                      // Get last N matches to display
+                      const displayMatches = matchesList.slice(-maxDisplayed);
+                      
+                      // Use DocumentFragment for better performance
+                      const fragment = document.createDocumentFragment();
+                      
+                      // Clear and rebuild (more efficient than innerHTML += for large lists)
+                      matchesListEl.innerHTML = '';
+                      
+                      // Add truncation notice if needed
+                      if (matchesList.length > maxDisplayed) {
+                        const notice = document.createElement('div');
+                        notice.style.cssText = 'padding:8px; margin:5px 0; background:#fff3e0; border-radius:3px; text-align:center; color:#e65100; font-size:12px;';
+                        notice.textContent = `显示最近 ${maxDisplayed} 条（共 ${matchesList.length} 条匹配）`;
+                        fragment.appendChild(notice);
+                      }
+                      
+                      displayMatches.forEach(match => {
+                        const div = document.createElement('div');
+                        div.style.cssText = 'padding:8px; margin:5px 0; background:white; border-radius:3px; border-left:3px solid #6001d2;';
+                        div.innerHTML = `<strong style="color:#6001d2;">${escapeHtml(match.fullMatch)}</strong><br><small style="color:#666;">📧 ${escapeHtml(match.subject?.substring(0, 30) || '')}... | 👤 ${escapeHtml(match.from?.substring(0, 20) || '')}</small>`;
+                        fragment.appendChild(div);
+                      });
+                      
+                      matchesListEl.appendChild(fragment);
+                      matchesDiv.scrollTop = matchesDiv.scrollHeight;
+                    }
                   }
                 } else if (data.type === 'complete') {
                   extractedResults = data.results;
