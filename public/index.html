@@ -5435,17 +5435,12 @@
       continueBtn.disabled = true;
       
       try {
-        // Get current mailbox credentials
-        if (!currentMailboxId) {
-          throw new Error('没有选中的邮箱，请先在邮箱管理中选择一个邮箱');
-        }
+        // Get credentials from the connection form (they should still be there)
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
         
-        // Get password for the mailbox
-        const pwdRes = await apiRequest(`/api/mailboxes/${currentMailboxId}/password`);
-        const pwdData = await pwdRes.json();
-        
-        if (!pwdData.success) {
-          throw new Error('无法获取邮箱密码');
+        if (!email || !password) {
+          throw new Error('邮箱凭据丢失，请返回邮箱管理重新输入邮箱和密码');
         }
         
         // Disconnect existing session if any
@@ -5458,30 +5453,39 @@
           } catch (e) {
             // Ignore disconnect errors
           }
+          sessionId = null;
         }
         
         // Reconnect
         const connectRes = await apiRequest('/api/connect', {
           method: 'POST',
-          body: JSON.stringify({
-            email: pwdData.email,
-            password: pwdData.password,
-            provider: currentProvider || 'gmail'
-          })
+          body: JSON.stringify({ email, password })
         });
         
         const connectData = await connectRes.json();
         
         if (connectData.success) {
           sessionId = connectData.sessionId;
-          folders = connectData.folders || [];
+          
+          // Update folder select if available
+          if (connectData.folders) {
+            const virtualFolders = ['[Gmail]', '[Google Mail]'];
+            const validFolders = connectData.folders.filter(f => !virtualFolders.includes(f));
+            const folderSelect = document.getElementById('folder');
+            if (folderSelect) {
+              folderSelect.innerHTML = validFolders.map(f => `<option value="${f}">${f}</option>`).join('');
+            }
+          }
           
           resumeStatus.textContent = '✅ 连接成功！可以继续提取';
           resumeStatus.style.color = '#4caf50';
           continueBtn.disabled = false;
           
           // Update connection status in UI
-          updateConnectionStatus(true, pwdData.email);
+          document.getElementById('connectionForm').classList.add('hidden');
+          document.getElementById('connectedInfo').classList.remove('hidden');
+          document.getElementById('connectedEmail').textContent = email;
+          showStatus('connectionStatus', '✅ 重新连接成功！', 'success');
         } else {
           throw new Error(connectData.error || '连接失败');
         }
