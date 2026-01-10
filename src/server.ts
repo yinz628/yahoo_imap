@@ -1322,7 +1322,6 @@ app.post('/api/empty-trash', async (req, res) => {
 
     let totalDeleted = 0;
     let totalErrors = 0;
-    let currentTotal = initialCount;
 
     // Helper function to reconnect
     const reconnect = async (): Promise<boolean> => {
@@ -1360,11 +1359,17 @@ app.post('/api/empty-trash', async (req, res) => {
     // Main deletion loop with reconnect support
     while (true) {
       try {
-        // Get current trash count
+        // Get current trash count to calculate actual progress
         const currentStatus = await session!.connection.status(trashFolder, { messages: true });
-        currentTotal = currentStatus.messages || 0;
+        const remainingCount = currentStatus.messages || 0;
         
-        if (currentTotal === 0) {
+        // Calculate deleted based on remaining (more accurate)
+        const actualDeleted = initialCount - remainingCount;
+        if (actualDeleted > totalDeleted) {
+          totalDeleted = actualDeleted;
+        }
+        
+        if (remainingCount === 0) {
           console.log('[EmptyTrash] Trash is now empty');
           break;
         }
@@ -1381,6 +1386,8 @@ app.post('/api/empty-trash', async (req, res) => {
             break;
           }
           
+          console.log(`[EmptyTrash] Found ${uids.length} UIDs to delete`);
+          
           // Process in batches
           const batchSize = 50;
           for (let i = 0; i < uids.length; i += batchSize) {
@@ -1392,12 +1399,13 @@ app.post('/api/empty-trash', async (req, res) => {
               await session!.connection.messageDelete(range, { uid: true });
               totalDeleted += batch.length;
               
-              const percent = Math.round((totalDeleted / initialCount) * 100);
+              // Cap at 100%
+              const percent = Math.min(100, Math.round((totalDeleted / initialCount) * 100));
               console.log(`[EmptyTrash] Deleted ${totalDeleted}/${initialCount} (${percent}%)`);
               
               res.write(JSON.stringify({ 
                 type: 'progress', 
-                deleted: totalDeleted, 
+                deleted: Math.min(totalDeleted, initialCount), 
                 total: initialCount,
                 percent
               }) + '\n');
@@ -1442,13 +1450,14 @@ app.post('/api/empty-trash', async (req, res) => {
         const reconnected = await reconnect();
         if (!reconnected) {
           // Send interruption message
+          const percent = Math.min(100, Math.round((totalDeleted / initialCount) * 100));
           res.write(JSON.stringify({ 
             type: 'interrupted', 
-            deleted: totalDeleted, 
+            deleted: Math.min(totalDeleted, initialCount), 
             total: initialCount,
-            percent: Math.round((totalDeleted / initialCount) * 100),
+            percent,
             error: errorMsg,
-            message: `连接中断！已删除 ${totalDeleted}/${initialCount} 封邮件。请稍后重试继续清空。`
+            message: `连接中断！已删除 ${Math.min(totalDeleted, initialCount)}/${initialCount} 封邮件。请稍后重试继续清空。`
           }) + '\n');
           res.end();
           return;
@@ -1463,9 +1472,9 @@ app.post('/api/empty-trash', async (req, res) => {
     
     res.write(JSON.stringify({ 
       type: 'complete', 
-      deleted: totalDeleted,
+      deleted: Math.min(totalDeleted, initialCount),
       errors: totalErrors,
-      message: `成功清空回收站，永久删除 ${totalDeleted} 封邮件${totalErrors > 0 ? `，${totalErrors} 封失败` : ''}`
+      message: `成功清空回收站，永久删除 ${Math.min(totalDeleted, initialCount)} 封邮件${totalErrors > 0 ? `，${totalErrors} 封失败` : ''}`
     }) + '\n');
     res.end();
     
