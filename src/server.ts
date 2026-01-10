@@ -1283,16 +1283,18 @@ app.post('/api/delete', async (req, res) => {
   }
 });
 
-// Empty trash folder with streaming progress
+// Empty trash folder with streaming progress and auto-reconnect
 app.post('/api/empty-trash', async (req, res) => {
   const { sessionId } = req.body;
-  const session = await ensureSessionConnected(sessionId);
+  let session = await ensureSessionConnected(sessionId);
   
   if (!session) {
     return res.status(400).json({ error: 'Not connected' });
   }
 
   const deleter = new EmailDeleter();
+  const maxReconnectAttempts = 5;
+  let reconnectAttempts = 0;
 
   try {
     console.log('[EmptyTrash] Starting...');
@@ -1305,104 +1307,178 @@ app.post('/api/empty-trash', async (req, res) => {
     }
     
     const status = await session.connection.status(trashFolder, { messages: true });
-    const totalCount = status.messages || 0;
+    const initialCount = status.messages || 0;
     
-    console.log(`[EmptyTrash] Found ${totalCount} emails in Trash`);
+    console.log(`[EmptyTrash] Found ${initialCount} emails in Trash`);
     
-    if (totalCount === 0) {
+    if (initialCount === 0) {
       return res.json({ deleted: 0, errors: 0, message: '回收站已经是空的' });
     }
 
-    // Use streaming for large deletions
-    const useStreaming = totalCount > 100;
-    
-    if (useStreaming) {
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Transfer-Encoding', 'chunked');
-      res.write(JSON.stringify({ type: 'init', total: totalCount }) + '\n');
-    }
+    // Always use streaming for trash operations
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.write(JSON.stringify({ type: 'init', total: initialCount }) + '\n');
 
-    // Open Trash folder in write mode
-    await session.connection.mailboxOpen(trashFolder, { readOnly: false });
+    let totalDeleted = 0;
+    let totalErrors = 0;
+    let currentTotal = initialCount;
 
-    let deleted = 0;
-    let errors = 0;
-
-    try {
-      // Get all UIDs in Trash
-      const uids = await session.connection.search({}, { uid: true });
+    // Helper function to reconnect
+    const reconnect = async (): Promise<boolean> => {
+      if (reconnectAttempts >= maxReconnectAttempts) {
+        console.log('[EmptyTrash] Max reconnect attempts reached');
+        return false;
+      }
       
-      if (uids === false || uids.length === 0) {
-        if (useStreaming) {
-          res.write(JSON.stringify({ type: 'complete', deleted: 0, errors: 0, message: '回收站已经是空的' }) + '\n');
-          res.end();
-        } else {
-          res.json({ deleted: 0, errors: 0, message: '回收站已经是空的' });
-        }
-        return;
-      }
-
-      // Process in batches
-      const batchSize = 50;
-      for (let i = 0; i < uids.length; i += batchSize) {
-        const batch = uids.slice(i, i + batchSize);
-        const range = batch.join(',');
+      reconnectAttempts++;
+      console.log(`[EmptyTrash] Reconnecting... attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
+      
+      res.write(JSON.stringify({ 
+        type: 'reconnecting', 
+        attempt: reconnectAttempts, 
+        maxAttempts: maxReconnectAttempts 
+      }) + '\n');
+      
+      try {
+        // Wait before reconnecting
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
-        try {
-          // Permanently delete (EXPUNGE)
-          await session.connection.messageDelete(range, { uid: true });
-          deleted += batch.length;
-          console.log(`[EmptyTrash] Deleted ${deleted}/${totalCount}`);
-          
-          if (useStreaming) {
-            res.write(JSON.stringify({ 
-              type: 'progress', 
-              deleted, 
-              total: totalCount,
-              percent: Math.round((deleted / totalCount) * 100)
-            }) + '\n');
-          }
-        } catch (error) {
-          console.error(`[EmptyTrash] Error deleting batch: ${error instanceof Error ? error.message : 'Unknown'}`);
-          errors += batch.length;
-          
-          if (useStreaming) {
-            res.write(JSON.stringify({ 
-              type: 'progress', 
-              deleted, 
-              errors,
-              total: totalCount,
-              error: error instanceof Error ? error.message : 'Unknown'
-            }) + '\n');
-          }
+        session = await ensureSessionConnected(sessionId);
+        if (!session) {
+          return false;
         }
         
-        // Small delay between batches
-        if (i + batchSize < uids.length) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
+        reconnectAttempts = 0; // Reset on successful reconnect
+        return true;
+      } catch (error) {
+        console.error('[EmptyTrash] Reconnect failed:', error);
+        return false;
       }
-    } finally {
-      await session.connection.mailboxClose();
-    }
-    
-    console.log(`[EmptyTrash] Deleted ${deleted} emails, ${errors} errors`);
-    
-    const result = {
-      deleted,
-      errors,
-      message: `成功清空回收站，永久删除 ${deleted} 封邮件${errors > 0 ? `，${errors} 封失败` : ''}`
     };
 
-    if (useStreaming) {
-      res.write(JSON.stringify({ type: 'complete', ...result }) + '\n');
-      res.end();
-    } else {
-      res.json(result);
+    // Main deletion loop with reconnect support
+    while (true) {
+      try {
+        // Get current trash count
+        const currentStatus = await session!.connection.status(trashFolder, { messages: true });
+        currentTotal = currentStatus.messages || 0;
+        
+        if (currentTotal === 0) {
+          console.log('[EmptyTrash] Trash is now empty');
+          break;
+        }
+        
+        // Open Trash folder in write mode
+        await session!.connection.mailboxOpen(trashFolder, { readOnly: false });
+        
+        try {
+          // Get all UIDs in Trash
+          const uids = await session!.connection.search({}, { uid: true });
+          
+          if (uids === false || uids.length === 0) {
+            await session!.connection.mailboxClose();
+            break;
+          }
+          
+          // Process in batches
+          const batchSize = 50;
+          for (let i = 0; i < uids.length; i += batchSize) {
+            const batch = uids.slice(i, i + batchSize);
+            const range = batch.join(',');
+            
+            try {
+              // Permanently delete (EXPUNGE)
+              await session!.connection.messageDelete(range, { uid: true });
+              totalDeleted += batch.length;
+              
+              const percent = Math.round((totalDeleted / initialCount) * 100);
+              console.log(`[EmptyTrash] Deleted ${totalDeleted}/${initialCount} (${percent}%)`);
+              
+              res.write(JSON.stringify({ 
+                type: 'progress', 
+                deleted: totalDeleted, 
+                total: initialCount,
+                percent
+              }) + '\n');
+            } catch (error) {
+              const errorMsg = error instanceof Error ? error.message : 'Unknown';
+              console.error(`[EmptyTrash] Error deleting batch: ${errorMsg}`);
+              
+              // Check if it's a connection error
+              if (errorMsg.includes('closed') || errorMsg.includes('disconnect') || 
+                  errorMsg.includes('ECONNRESET') || errorMsg.includes('timeout')) {
+                throw error; // Will trigger reconnect
+              }
+              
+              totalErrors += batch.length;
+            }
+            
+            // Small delay between batches
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          
+          await session!.connection.mailboxClose();
+          
+        } catch (error) {
+          // Try to close mailbox if open
+          try {
+            await session!.connection.mailboxClose();
+          } catch (e) {}
+          throw error;
+        }
+        
+        // Check if there are more emails (in case new ones arrived)
+        const finalStatus = await session!.connection.status(trashFolder, { messages: true });
+        if ((finalStatus.messages || 0) === 0) {
+          break;
+        }
+        
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown';
+        console.error(`[EmptyTrash] Error: ${errorMsg}`);
+        
+        // Try to reconnect
+        const reconnected = await reconnect();
+        if (!reconnected) {
+          // Send interruption message
+          res.write(JSON.stringify({ 
+            type: 'interrupted', 
+            deleted: totalDeleted, 
+            total: initialCount,
+            percent: Math.round((totalDeleted / initialCount) * 100),
+            error: errorMsg,
+            message: `连接中断！已删除 ${totalDeleted}/${initialCount} 封邮件。请稍后重试继续清空。`
+          }) + '\n');
+          res.end();
+          return;
+        }
+        
+        // Continue after reconnect
+        console.log('[EmptyTrash] Reconnected, continuing...');
+      }
     }
+    
+    console.log(`[EmptyTrash] Completed: deleted ${totalDeleted} emails, ${totalErrors} errors`);
+    
+    res.write(JSON.stringify({ 
+      type: 'complete', 
+      deleted: totalDeleted,
+      errors: totalErrors,
+      message: `成功清空回收站，永久删除 ${totalDeleted} 封邮件${totalErrors > 0 ? `，${totalErrors} 封失败` : ''}`
+    }) + '\n');
+    res.end();
+    
   } catch (error) {
-    console.error('[EmptyTrash] Error:', error);
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    console.error('[EmptyTrash] Fatal error:', error);
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    
+    try {
+      res.write(JSON.stringify({ type: 'error', error: errorMsg }) + '\n');
+      res.end();
+    } catch (e) {
+      // Response might already be closed
+    }
   }
 });
 

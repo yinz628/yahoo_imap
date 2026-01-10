@@ -139,3 +139,4 @@ curl http://localhost:8001/health
 # 确保 data 和 logs 目录有正确权限
 sudo chown -R 1000:1000 data logs
 ```
+❌ 清空失败: Unexpected token '<', "<html> <h"... is not valid JSON

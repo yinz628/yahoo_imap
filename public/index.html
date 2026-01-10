@@ -4222,6 +4222,13 @@
                 } else if (data.type === 'progress') {
                   isStreaming = true;
                   statusEl.textContent = `正在清空回收站 ${data.deleted}/${data.total} (${data.percent}%)...`;
+                } else if (data.type === 'reconnecting') {
+                  isStreaming = true;
+                  statusEl.textContent = `🔄 正在重新连接... (${data.attempt}/${data.maxAttempts})`;
+                } else if (data.type === 'interrupted') {
+                  isStreaming = true;
+                  statusEl.textContent = `⚠️ ${data.message}`;
+                  finalResult = data;
                 } else if (data.type === 'complete') {
                   isStreaming = true;
                   finalResult = data;
@@ -4243,14 +4250,17 @@
           if (buffer) {
             try {
               const data = JSON.parse(buffer);
-              if (data.type === 'complete' || !data.type) {
+              if (data.type === 'complete' || data.type === 'interrupted' || !data.type) {
                 finalResult = data;
               }
             } catch (e) {}
           }
           
           if (finalResult) {
-            if (finalResult.error) {
+            if (finalResult.type === 'interrupted') {
+              statusEl.textContent = `⚠️ ${finalResult.message}`;
+              return;
+            } else if (finalResult.error) {
               statusEl.textContent = `❌ 清空失败: ${finalResult.error}`;
               return;
             } else {
@@ -6042,6 +6052,15 @@
                 } else if (data.type === 'progress') {
                   isStreaming = true;
                   managementResult.textContent = `正在清空回收站 ${data.deleted}/${data.total} (${data.percent}%)...`;
+                } else if (data.type === 'reconnecting') {
+                  isStreaming = true;
+                  managementResult.className = 'status warning';
+                  managementResult.textContent = `🔄 正在重新连接... (${data.attempt}/${data.maxAttempts})`;
+                } else if (data.type === 'interrupted') {
+                  isStreaming = true;
+                  managementResult.className = 'status warning';
+                  managementResult.textContent = `⚠️ ${data.message}`;
+                  finalResult = data;
                 } else if (data.type === 'complete') {
                   isStreaming = true;
                   finalResult = data;
@@ -6063,14 +6082,17 @@
           if (buffer) {
             try {
               const data = JSON.parse(buffer);
-              if (data.type === 'complete' || !data.type) {
+              if (data.type === 'complete' || data.type === 'interrupted' || !data.type) {
                 finalResult = data;
               }
             } catch (e) {}
           }
           
           if (finalResult) {
-            if (finalResult.error) {
+            if (finalResult.type === 'interrupted') {
+              managementResult.className = 'status warning';
+              managementResult.textContent = `⚠️ ${finalResult.message}`;
+            } else if (finalResult.error) {
               managementResult.className = 'status error';
               managementResult.textContent = '❌ 清空失败: ' + finalResult.error;
             } else {
