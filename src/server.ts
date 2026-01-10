@@ -1803,9 +1803,10 @@ app.post('/api/emails/search', async (req, res) => {
  * POST /api/emails/conversations - Get emails grouped by conversation (thread)
  * Groups emails by normalized subject (removing Re:, Fwd:, etc.)
  * Returns conversations sorted by latest email date
+ * Supports optional subjectPattern for search filtering
  */
 app.post('/api/emails/conversations', async (req, res) => {
-  const { sessionId, folder = 'INBOX', page = 1, pageSize = 20, sortOrder = 'desc' } = req.body;
+  const { sessionId, folder = 'INBOX', page = 1, pageSize = 20, sortOrder = 'desc', subjectPattern } = req.body;
   const session = await ensureSessionConnected(sessionId);
   
   if (!session) {
@@ -1813,7 +1814,7 @@ app.post('/api/emails/conversations', async (req, res) => {
   }
 
   try {
-    console.log(`[Conversations] Fetching conversations from ${folder}, page ${page}, pageSize ${pageSize}`);
+    console.log(`[Conversations] Fetching conversations from ${folder}, page ${page}, pageSize ${pageSize}${subjectPattern ? `, search: ${subjectPattern}` : ''}`);
     
     const connection = session.connection;
     
@@ -1838,10 +1839,37 @@ app.post('/api/emails/conversations', async (req, res) => {
         });
       }
       
-      // Get all UIDs
-      const allUids = await connection.search({}, { uid: true });
+      // Get UIDs - if searching, use subject search criteria
+      let allUids: number[] = [];
       
-      if (allUids === false || allUids.length === 0) {
+      if (subjectPattern) {
+        // Search with multiple patterns to handle special characters
+        const searchPatterns = [
+          subjectPattern,
+          subjectPattern
+            .replace(/[\u2018\u2019\u0060\u00B4]/g, "'")
+            .replace(/[\u201C\u201D]/g, '"')
+            .replace(/[\u2013\u2014]/g, '-'),
+          subjectPattern.replace(/'/g, '\u2019')
+        ];
+        
+        const uniquePatterns = [...new Set(searchPatterns)];
+        
+        for (const pattern of uniquePatterns) {
+          console.log(`[Conversations] Searching with pattern: ${pattern}`);
+          const matchingUids = await connection.search({ subject: pattern }, { uid: true });
+          if (matchingUids && matchingUids.length > 0) {
+            allUids = [...new Set([...allUids, ...matchingUids])];
+          }
+        }
+        
+        console.log(`[Conversations] Found ${allUids.length} matching emails`);
+      } else {
+        const uids = await connection.search({}, { uid: true });
+        allUids = uids === false ? [] : uids;
+      }
+      
+      if (allUids.length === 0) {
         return res.json({
           success: true,
           conversations: [],

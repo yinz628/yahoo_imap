@@ -3337,13 +3337,20 @@
       showConversationContainer('<div class="conversation-empty">⏳ 正在加载会话...</div>');
       
       try {
-        const res = await apiPost('/api/emails/conversations', {
+        const body = {
           sessionId,
           folder: emailMgmtState.currentFolder,
           page: emailMgmtState.pagination.page,
           pageSize: emailMgmtState.pagination.pageSize,
           sortOrder: emailMgmtState.sortOrder
-        });
+        };
+        
+        // Add search pattern if in search mode
+        if (emailMgmtState.isSearchMode && emailMgmtState.searchPattern) {
+          body.subjectPattern = emailMgmtState.searchPattern;
+        }
+        
+        const res = await apiPost('/api/emails/conversations', body);
         
         if (!res.ok) {
           const error = await res.json();
