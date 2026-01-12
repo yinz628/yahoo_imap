@@ -903,6 +903,7 @@ app.post('/api/extract', async (req, res) => {
               groups: m.groups,
               subject: result.email.subject,
               from: result.email.from,
+              to: result.email.to,
               date: result.email.date
             }))
           }) + '\n');

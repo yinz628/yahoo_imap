@@ -61,6 +61,7 @@ export interface ParsedEmail {
   uid: number;
   date: Date;
   from: string;
+  to?: string;
   subject: string;
   textContent: string;
   htmlContent?: string;

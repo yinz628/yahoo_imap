@@ -5563,7 +5563,8 @@
                       displayMatches.forEach(match => {
                         const div = document.createElement('div');
                         div.style.cssText = 'padding:8px; margin:5px 0; background:white; border-radius:3px; border-left:3px solid #6001d2;';
-                        div.innerHTML = `<strong style="color:#6001d2;">${escapeHtml(match.fullMatch)}</strong><br><small style="color:#666;">📧 ${escapeHtml(match.subject?.substring(0, 30) || '')}... | 👤 ${escapeHtml(match.from?.substring(0, 20) || '')}</small>`;
+                        const toInfo = match.to ? ` | 📬 ${escapeHtml(match.to.substring(0, 25))}` : '';
+                        div.innerHTML = `<strong style="color:#6001d2;">${escapeHtml(match.fullMatch)}</strong><br><small style="color:#666;">📧 ${escapeHtml(match.subject?.substring(0, 30) || '')}... | 👤 ${escapeHtml(match.from?.substring(0, 20) || '')}${toInfo}</small>`;
                         fragment.appendChild(div);
                       });
                       

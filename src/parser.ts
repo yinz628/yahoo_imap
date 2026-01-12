@@ -19,6 +19,7 @@ export class EmailParser {
     const parsed: ParsedMail = await simpleParser(raw);
 
     const from = this.extractFromAddress(parsed);
+    const to = this.extractToAddress(parsed);
     const subject = parsed.subject || '';
     const date = parsed.date || new Date();
     const textContent = parsed.text || '';
@@ -28,6 +29,7 @@ export class EmailParser {
       uid,
       date,
       from,
+      to,
       subject,
       textContent,
       htmlContent,
@@ -115,6 +117,20 @@ export class EmailParser {
     if (parsed.from?.value && parsed.from.value.length > 0) {
       const addr = parsed.from.value[0];
       return addr.address || addr.name || '';
+    }
+    return '';
+  }
+
+  /**
+   * Extract the to address from parsed mail.
+   */
+  private extractToAddress(parsed: ParsedMail): string {
+    if (parsed.to) {
+      const toField = Array.isArray(parsed.to) ? parsed.to[0] : parsed.to;
+      if (toField?.value && toField.value.length > 0) {
+        const addr = toField.value[0];
+        return addr.address || addr.name || '';
+      }
     }
     return '';
   }
