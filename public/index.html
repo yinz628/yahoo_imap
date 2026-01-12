@@ -4843,18 +4843,22 @@
     async function checkServerStatus() {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         
-        const res = await fetch(`${API}/api/connect`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: 'test', password: 'test' }),
+        // 使用轻量级的 /health 端点检测服务器状态
+        const res = await fetch(`${API}/health`, {
+          method: 'GET',
           signal: controller.signal
         });
         clearTimeout(timeoutId);
         
-        document.getElementById('serverStatus').innerHTML = '✅ 服务器运行中';
-        document.getElementById('serverStatus').style.color = '#2e7d32';
+        if (res.ok) {
+          document.getElementById('serverStatus').innerHTML = '✅ 服务器运行中';
+          document.getElementById('serverStatus').style.color = '#2e7d32';
+        } else {
+          document.getElementById('serverStatus').innerHTML = '⚠️ 服务器异常';
+          document.getElementById('serverStatus').style.color = '#ff9800';
+        }
       } catch (e) {
         if (e.name === 'AbortError') {
           document.getElementById('serverStatus').innerHTML = '⏳ 服务器响应缓慢，请稍候...';
