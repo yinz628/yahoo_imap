@@ -125,13 +125,32 @@ export class EmailParser {
    * Extract the to address from parsed mail.
    */
   private extractToAddress(parsed: ParsedMail): string {
+    // Try to extract from 'to' field
     if (parsed.to) {
-      const toField = Array.isArray(parsed.to) ? parsed.to[0] : parsed.to;
-      if (toField?.value && toField.value.length > 0) {
-        const addr = toField.value[0];
-        return addr.address || addr.name || '';
+      // Handle AddressObject type
+      if (typeof parsed.to === 'object' && 'value' in parsed.to) {
+        const toValue = parsed.to.value;
+        if (Array.isArray(toValue) && toValue.length > 0) {
+          return toValue[0].address || toValue[0].name || '';
+        }
+      }
+      // Handle array of AddressObject
+      if (Array.isArray(parsed.to) && parsed.to.length > 0) {
+        const first = parsed.to[0];
+        if (first && 'value' in first && Array.isArray(first.value) && first.value.length > 0) {
+          return first.value[0].address || first.value[0].name || '';
+        }
       }
     }
+    
+    // Fallback: try delivered-to header
+    if (parsed.headers) {
+      const deliveredTo = parsed.headers.get('delivered-to');
+      if (deliveredTo && typeof deliveredTo === 'string') {
+        return deliveredTo;
+      }
+    }
+    
     return '';
   }
 }
