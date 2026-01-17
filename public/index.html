@@ -5533,13 +5533,6 @@
                     
                     uniqueMatches.forEach(match => {
                       totalMatches++;
-                      
-                      // Debug: Log first match to check if 'to' field exists
-                      if (totalMatches === 1) {
-                        console.log('First match from server:', match);
-                        console.log('Has to field?', 'to' in match, 'Value:', match.to);
-                      }
-                      
                       matchesList.push(match);
                     });
                     
@@ -5796,15 +5789,7 @@
         });
       });
       
-      const results = Array.from(emailMap.values());
-      
-      // Debug: Log first result to check if 'to' field exists
-      if (results.length > 0) {
-        console.log('First result email object:', results[0].email);
-        console.log('Has to field?', 'to' in results[0].email, 'Value:', results[0].email.to);
-      }
-      
-      return results;
+      return Array.from(emailMap.values());
     }
 
     function renderResults(results) {
