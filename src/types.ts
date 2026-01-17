@@ -90,10 +90,11 @@ export interface ExportRecord {
   emailUid: number;
   emailDate: string;
   emailFrom: string;
+  emailTo?: string;
   emailSubject: string;
   matchIndex: number;
   fullMatch: string;
-  [groupName: string]: string | number;
+  [groupName: string]: string | number | undefined;
 }
 
 /**

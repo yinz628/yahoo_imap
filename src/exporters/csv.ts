@@ -116,6 +116,7 @@ export class CSVExporter {
           emailUid: email.uid,
           emailDate: email.date.toISOString(),
           emailFrom: email.from,
+          emailTo: email.to || '',
           emailSubject: email.subject,
           matchIndex: 0,
           fullMatch: '',
@@ -127,6 +128,7 @@ export class CSVExporter {
             emailUid: email.uid,
             emailDate: email.date.toISOString(),
             emailFrom: email.from,
+            emailTo: email.to || '',
             emailSubject: email.subject,
             matchIndex: i,
             fullMatch: match.fullMatch,
@@ -149,7 +151,7 @@ export class CSVExporter {
    * Get base headers for CSV export.
    */
   private getBaseHeaders(): string[] {
-    return ['emailUid', 'emailDate', 'emailFrom', 'emailSubject', 'matchIndex', 'fullMatch'];
+    return ['emailUid', 'emailDate', 'emailFrom', 'emailTo', 'emailSubject', 'matchIndex', 'fullMatch'];
   }
 
   /**

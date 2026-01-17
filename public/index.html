@@ -5814,7 +5814,7 @@
       results.forEach(r => r.matches.forEach(m => Object.keys(m.groups).forEach(k => groupNames.add(k))));
       const groups = Array.from(groupNames);
 
-      let html = '<table><thead><tr><th>日期</th><th>发件人</th><th>主题</th><th>匹配内容</th>';
+      let html = '<table><thead><tr><th>日期</th><th>发件人</th><th>收件人</th><th>主题</th><th>匹配内容</th>';
       groups.forEach(g => html += `<th>${g}</th>`);
       html += '</tr></thead><tbody>';
 
@@ -5837,6 +5837,7 @@
           if (i === 0) {
             html += `<td rowspan="${uniqueMatches.length}">${new Date(r.email.date).toLocaleDateString()}</td>`;
             html += `<td rowspan="${uniqueMatches.length}">${escapeHtml(r.email.from)}</td>`;
+            html += `<td rowspan="${uniqueMatches.length}">${escapeHtml(r.email.to || '')}</td>`;
             html += `<td rowspan="${uniqueMatches.length}">${escapeHtml(r.email.subject)}</td>`;
           }
           html += `<td><span class="match">${escapeHtml(m.fullMatch)}</span></td>`;
@@ -5859,7 +5860,7 @@
       extractedResults.forEach(r => r.matches.forEach(m => Object.keys(m.groups).forEach(k => groupNames.add(k))));
       const groups = Array.from(groupNames);
 
-      let csv = 'Date,From,Subject,Match,' + groups.join(',') + '\n';
+      let csv = 'Date,From,To,Subject,Match,' + groups.join(',') + '\n';
       
       extractedResults.forEach(r => {
         // Deduplicate matches by fullMatch value (case-insensitive)
@@ -5876,6 +5877,7 @@
         uniqueMatches.forEach(m => {
           csv += `"${new Date(r.email.date).toISOString()}",`;
           csv += `"${r.email.from.replace(/"/g, '""')}",`;
+          csv += `"${(r.email.to || '').replace(/"/g, '""')}",`;
           csv += `"${r.email.subject.replace(/"/g, '""')}",`;
           csv += `"${m.fullMatch.replace(/"/g, '""')}",`;
           csv += groups.map(g => `"${(m.groups[g] || '').replace(/"/g, '""')}"`).join(',');
