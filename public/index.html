@@ -5767,17 +5767,18 @@
 
     // Convert flat matches list to results format for renderResults
     function convertMatchesToResults(matchesList) {
-      // Group matches by email (using subject + from + date as key)
+      // Group matches by email (using subject + from + date + to as key to distinguish emails with same metadata but different recipients)
       const emailMap = new Map();
       
       matchesList.forEach(match => {
-        const key = `${match.subject}|${match.from}|${match.date}`;
+        const key = `${match.subject}|${match.from}|${match.date}|${match.to || ''}`;
         if (!emailMap.has(key)) {
           emailMap.set(key, {
             email: {
               subject: match.subject,
               from: match.from,
-              date: match.date
+              date: match.date,
+              to: match.to
             },
             matches: []
           });
