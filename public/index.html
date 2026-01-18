@@ -4896,11 +4896,41 @@
         return;
       }
 
+      // 🆕 检测提供商类型
+      const isGmail = email.includes('gmail') || email.includes('googlemail');
+      const isYahoo = email.includes('yahoo') || email.includes('ymail') || email.includes('rocketmail');
+
       showStatus('connectionStatus', '正在连接...', 'info');
+      
+      // 🆕 Progressive feedback timers - 所有提供商都适用
+      const feedback10s = setTimeout(() => {
+        showStatus('connectionStatus', '⏳ 连接较慢，请稍候...', 'info');
+      }, 10000);
+      
+      const feedback30s = setTimeout(() => {
+        if (isGmail) {
+          showStatus('connectionStatus', '⏳ Gmail 响应缓慢，继续等待中...', 'info');
+        } else if (isYahoo) {
+          showStatus('connectionStatus', '⏳ Yahoo 连接时间较长，请耐心等待...', 'info');
+        } else {
+          showStatus('connectionStatus', '⏳ 连接时间较长，请耐心等待...', 'info');
+        }
+      }, 30000);
       
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        // 🆕 Provider-specific timeout
+        let timeout;
+        if (isGmail) {
+          timeout = 90000; // Gmail: 90秒
+        } else if (isYahoo) {
+          timeout = 45000; // Yahoo: 45秒
+        } else {
+          timeout = 60000; // 其他: 60秒
+        }
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        
+        const startTime = Date.now();
         
         // Use apiPost for connect - includes auth token
         const res = await apiRequest('/api/connect', {
@@ -4910,6 +4940,10 @@
         });
         
         clearTimeout(timeoutId);
+        clearTimeout(feedback10s);
+        clearTimeout(feedback30s);
+        
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         
         if (!res.ok) {
           const error = await res.json();
@@ -4932,7 +4966,8 @@
           const folderSelect = document.getElementById('folder');
           folderSelect.innerHTML = validFolders.map(f => `<option value="${f}">${f}</option>`).join('');
           
-          showStatus('connectionStatus', '✅ 连接成功！', 'success');
+          // 🆕 Show connection time - 所有提供商
+          showStatus('connectionStatus', `✅ 连接成功！(耗时 ${elapsed} 秒)`, 'success');
           
           // Initialize email management if currently on that module
           if (currentModule === 'email-management') {
@@ -4942,10 +4977,22 @@
           showStatus('connectionStatus', `连接失败: ${data.error || 'Unknown error'}`, 'error');
         }
       } catch (e) {
+        clearTimeout(feedback10s);
+        clearTimeout(feedback30s);
+        
         if (e.name === 'AbortError') {
-          showStatus('connectionStatus', '❌ 连接超时 (30 秒)。请检查：\n1. 服务器是否运行 (npm run web)\n2. 网络连接\n3. Yahoo 邮箱和密码是否正确', 'error');
+          // 🆕 Provider-specific timeout message
+          let timeoutMsg;
+          if (isGmail) {
+            timeoutMsg = '❌ 连接超时 (90 秒)。Gmail 连接较慢，请检查：\n1. 网络连接是否稳定\n2. 是否使用了应用专用密码\n3. 稍后重试';
+          } else if (isYahoo) {
+            timeoutMsg = '❌ 连接超时 (45 秒)。请检查：\n1. 网络连接是否稳定\n2. 是否使用了应用专用密码\n3. 稍后重试';
+          } else {
+            timeoutMsg = '❌ 连接超时。请检查：\n1. 服务器是否运行\n2. 网络连接\n3. 邮箱和密码是否正确';
+          }
+          showStatus('connectionStatus', timeoutMsg, 'error');
         } else {
-          showStatus('connectionStatus', `❌ 连接错误: ${e.message}\n\n请检查：\n1. 服务器是否运行 (npm run web)\n2. 浏览器控制台 (F12) 查看详细错误`, 'error');
+          showStatus('connectionStatus', `❌ 连接错误: ${e.message}`, 'error');
         }
         console.error('Connection error:', e);
       }

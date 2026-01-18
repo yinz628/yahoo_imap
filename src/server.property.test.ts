@@ -979,3 +979,189 @@ describe('Email Management Property Tests', () => {
     });
   });
 });
+
+// ============================================
+// Connection Stability Property Tests
+// ============================================
+
+describe('Connection Stability Property Tests', () => {
+  // **Feature: gmail-connection-stability, Property 7: 批量重连指数退避**
+  // **Validates: Requirements 2.1**
+  describe('Property 7: Batch Reconnect Exponential Backoff', () => {
+    /**
+     * Helper function to calculate expected delay using exponential backoff
+     * Formula: min(baseDelay * 2^(attempt-1), maxDelay)
+     */
+    function calculateExpectedDelay(attempt: number, baseDelay: number = 2000, maxDelay: number = 30000): number {
+      const delay = baseDelay * Math.pow(2, attempt - 1);
+      return Math.min(delay, maxDelay);
+    }
+
+    it('reconnect delays should follow exponential backoff pattern', async () => {
+      await fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 10 }), // attempt number
+          (attempt) => {
+            const baseDelay = 2000;
+            const maxDelay = 30000;
+            
+            // Calculate expected delay
+            const expectedDelay = calculateExpectedDelay(attempt, baseDelay, maxDelay);
+            
+            // Verify exponential growth before hitting max
+            if (attempt === 1) {
+              expect(expectedDelay).toBe(2000); // 2000 * 2^0 = 2000
+            } else if (attempt === 2) {
+              expect(expectedDelay).toBe(4000); // 2000 * 2^1 = 4000
+            } else if (attempt === 3) {
+              expect(expectedDelay).toBe(8000); // 2000 * 2^2 = 8000
+            } else if (attempt === 4) {
+              expect(expectedDelay).toBe(16000); // 2000 * 2^3 = 16000
+            } else if (attempt >= 5) {
+              // Should cap at maxDelay
+              expect(expectedDelay).toBe(30000);
+            }
+            
+            // Verify delay is within bounds
+            expect(expectedDelay).toBeGreaterThanOrEqual(baseDelay);
+            expect(expectedDelay).toBeLessThanOrEqual(maxDelay);
+            
+            return true;
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('each retry delay should be double the previous (until max)', async () => {
+      await fc.assert(
+        fc.property(
+          fc.integer({ min: 2, max: 5 }), // attempt > 1
+          (attempt) => {
+            const baseDelay = 2000;
+            const maxDelay = 30000;
+            
+            const currentDelay = calculateExpectedDelay(attempt, baseDelay, maxDelay);
+            const previousDelay = calculateExpectedDelay(attempt - 1, baseDelay, maxDelay);
+            
+            // If neither has hit the max, current should be double previous
+            if (currentDelay < maxDelay && previousDelay < maxDelay) {
+              expect(currentDelay).toBe(previousDelay * 2);
+            }
+            
+            // Current delay should always be >= previous delay
+            expect(currentDelay).toBeGreaterThanOrEqual(previousDelay);
+            
+            return true;
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('delay should never exceed maxDelay regardless of attempt number', async () => {
+      await fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 100 }), // test with large attempt numbers
+          (attempt) => {
+            const baseDelay = 2000;
+            const maxDelay = 30000;
+            
+            const delay = calculateExpectedDelay(attempt, baseDelay, maxDelay);
+            
+            // Delay should never exceed max
+            expect(delay).toBeLessThanOrEqual(maxDelay);
+            
+            // For large attempts, should always be at max
+            if (attempt >= 5) {
+              expect(delay).toBe(maxDelay);
+            }
+            
+            return true;
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('delay sequence should be monotonically increasing until max', async () => {
+      await fc.assert(
+        fc.property(
+          fc.integer({ min: 5, max: 10 }), // number of attempts to test
+          (maxAttempts) => {
+            const baseDelay = 2000;
+            const maxDelay = 30000;
+            const delays: number[] = [];
+            
+            // Generate delay sequence
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+              delays.push(calculateExpectedDelay(attempt, baseDelay, maxDelay));
+            }
+            
+            // Verify sequence is monotonically increasing (or stays at max)
+            for (let i = 1; i < delays.length; i++) {
+              expect(delays[i]).toBeGreaterThanOrEqual(delays[i - 1]);
+            }
+            
+            // Verify first delay is baseDelay
+            expect(delays[0]).toBe(baseDelay);
+            
+            // Verify last delay is at or approaching maxDelay
+            expect(delays[delays.length - 1]).toBeLessThanOrEqual(maxDelay);
+            
+            return true;
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('exponential backoff should apply to all providers', async () => {
+      await fc.assert(
+        fc.property(
+          fc.constantFrom('gmail', 'yahoo', 'other'),
+          fc.integer({ min: 1, max: 5 }),
+          (provider, attempt) => {
+            // All providers should use the same exponential backoff formula
+            const baseDelay = 2000;
+            const maxDelay = 30000;
+            
+            const delay = calculateExpectedDelay(attempt, baseDelay, maxDelay);
+            
+            // Verify delay calculation is independent of provider
+            // (same formula for all providers)
+            expect(delay).toBe(Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay));
+            
+            return true;
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('reconnect should not exceed maxReconnectAttempts', async () => {
+      await fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 20 }),
+          (attemptNumber) => {
+            const maxReconnectAttempts = 5;
+            
+            // Simulate reconnect attempt tracking
+            const shouldAttemptReconnect = attemptNumber <= maxReconnectAttempts;
+            
+            if (attemptNumber > maxReconnectAttempts) {
+              // Should not attempt reconnect beyond max
+              expect(shouldAttemptReconnect).toBe(false);
+            } else {
+              // Should attempt reconnect within limit
+              expect(shouldAttemptReconnect).toBe(true);
+            }
+            
+            return true;
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});

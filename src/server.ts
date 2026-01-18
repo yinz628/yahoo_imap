@@ -585,7 +585,7 @@ app.post('/api/connect', async (req, res) => {
   const provider: EmailProvider = requestedProvider || detectEmailProvider(email);
   const imapSettings = getIMAPSettings(provider);
 
-  const connector = new IMAPConnector();
+  const connector = new IMAPConnector(provider);
   const config: IMAPConfig = {
     email,
     password,
@@ -747,9 +747,9 @@ app.post('/api/extract', async (req, res) => {
   console.log(`[Extract] Filter: ${JSON.stringify(fetchFilter)}`);
   console.log(`[Extract] Delay: ${delayMs}ms, StripHtml: ${stripHtml}, Skip: ${skipCount}`);
 
-  // Helper function to reconnect
-  const reconnect = async (): Promise<boolean> => {
-    console.log(`[Extract] Attempting to reconnect...`);
+  // Helper function to reconnect with exponential backoff
+  const reconnect = async (attempt: number): Promise<boolean> => {
+    console.log(`[Extract] Attempting to reconnect (attempt ${attempt})...`);
     const imapSettings = getIMAPSettings(session!.provider);
     
     // First try to disconnect cleanly
@@ -759,8 +759,13 @@ app.post('/api/extract', async (req, res) => {
       // Ignore disconnect errors
     }
     
-    // Wait a bit before reconnecting
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Calculate delay using exponential backoff: min(baseDelay * 2^(attempt-1), maxDelay)
+    const baseDelay = 2000;
+    const maxDelay = 30000;
+    const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+    
+    console.log(`[Extract] Waiting ${delay}ms before reconnect...`);
+    await new Promise(resolve => setTimeout(resolve, delay));
     
     const result = await session!.connector.connect({
       email: session!.email,
@@ -792,7 +797,7 @@ app.post('/api/extract', async (req, res) => {
     } catch (error) {
       // Try reconnect and retry
       console.log('[Extract] Failed to get UIDs, attempting reconnect...');
-      if (await reconnect()) {
+      if (await reconnect(1)) {
         allUIDs = await fetcher.getMatchingUIDs(session.connection, fetchFilter);
       } else {
         throw new Error('Failed to get email list: connection lost');
@@ -853,14 +858,14 @@ app.post('/api/extract', async (req, res) => {
           console.error(`[Extract] Batch fetch attempt ${attempt + 1} failed:`, error);
           
           if (attempt < 2) {
-            // Try to reconnect
+            // Try to reconnect with exponential backoff
             reconnectAttempts++;
             if (reconnectAttempts > maxReconnectAttempts) {
               throw new Error(`Max reconnect attempts (${maxReconnectAttempts}) reached`);
             }
             
             console.log(`[Extract] Reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
-            if (!await reconnect()) {
+            if (!await reconnect(reconnectAttempts)) {
               throw new Error('Failed to reconnect to mail server');
             }
           }

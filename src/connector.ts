@@ -1,6 +1,23 @@
 // IMAP Connector - Manages connection to email servers (Yahoo, Gmail, etc.)
 import { ImapFlow } from 'imapflow';
-import type { IMAPConfig } from './types.js';
+import type { 
+  IMAPConfig, 
+  ConnectionOptions, 
+  ConnectionResult, 
+  EmailProvider, 
+  IMAPServerSettings, 
+  ProviderConnectionOptions 
+} from './types.js';
+import { ErrorClassifier, ErrorType } from './error-classifier.js';
+
+// Re-export types for convenience
+export type { 
+  ConnectionOptions, 
+  ConnectionResult, 
+  EmailProvider, 
+  IMAPServerSettings, 
+  ProviderConnectionOptions 
+};
 
 /**
  * Error thrown when IMAP authentication fails
@@ -23,29 +40,6 @@ export class ConnectionError extends Error {
     this.name = 'ConnectionError';
     this.retryGuidance = retryGuidance || 'Please check your network connection and try again.';
   }
-}
-
-/**
- * Result of a connection attempt
- */
-export interface ConnectionResult {
-  success: boolean;
-  error?: string;
-  connection?: ImapFlow;
-}
-
-/**
- * Supported email provider types
- */
-export type EmailProvider = 'yahoo' | 'gmail' | 'custom';
-
-/**
- * IMAP server settings for a provider
- */
-export interface IMAPServerSettings {
-  host: string;
-  port: number;
-  tls: boolean;
 }
 
 /**
@@ -98,21 +92,47 @@ export function detectEmailProvider(email: string): EmailProvider {
 }
 
 /**
- * Connection options for retry and timeout
+ * Provider-specific connection configurations
+ * Yahoo: Fast and stable, shorter timeouts
+ * Gmail: Slower response, needs longer timeouts and more retries
+ * Default: Balanced configuration for other providers
  */
-export interface ConnectionOptions {
-  maxRetries?: number;
-  retryDelay?: number;
-  connectionTimeout?: number;
-  idleTimeout?: number;
+export const PROVIDER_CONNECTION_OPTIONS: ProviderConnectionOptions = {
+  yahoo: {
+    maxRetries: 3,
+    retryDelay: 2000,
+    retryDelayMax: 10000,          // Max delay 10s
+    connectionTimeout: 30000,      // Yahoo: 30s (usually fast)
+    operationTimeout: 20000,       // Operation timeout: 20s
+    idleTimeout: 300000,           // Keep-Alive interval: 5 minutes
+  },
+  gmail: {
+    maxRetries: 5,                 // Gmail: More retries
+    retryDelay: 2000,              // Base delay (will use exponential backoff)
+    retryDelayMax: 30000,          // Max delay 30s (longer)
+    connectionTimeout: 60000,      // Gmail: 60s (2x Yahoo)
+    operationTimeout: 45000,       // Operation timeout: 45s
+    idleTimeout: 180000,           // Keep-Alive interval: 3 minutes (more frequent)
+  },
+  default: {
+    maxRetries: 3,
+    retryDelay: 2000,
+    retryDelayMax: 15000,          // Default: 15s
+    connectionTimeout: 40000,      // Default: 40s
+    operationTimeout: 30000,       // Default: 30s
+    idleTimeout: 240000,           // Default: 4 minutes
+  },
+};
+
+/**
+ * Get connection options for a provider
+ * Maps 'custom' provider to 'default' configuration
+ */
+export function getProviderConnectionOptions(provider: EmailProvider): Required<ConnectionOptions> {
+  return provider === 'custom' ? PROVIDER_CONNECTION_OPTIONS.default : PROVIDER_CONNECTION_OPTIONS[provider];
 }
 
-const DEFAULT_CONNECTION_OPTIONS: Required<ConnectionOptions> = {
-  maxRetries: 3,
-  retryDelay: 2000,
-  connectionTimeout: 30000,
-  idleTimeout: 300000, // 5 minutes
-};
+const DEFAULT_CONNECTION_OPTIONS: Required<ConnectionOptions> = PROVIDER_CONNECTION_OPTIONS.default;
 
 /**
  * IMAPConnector manages the connection to Yahoo Mail server via IMAP.
@@ -123,12 +143,37 @@ export class IMAPConnector {
   private client: ImapFlow | null = null;
   private config: IMAPConfig | null = null;
   private options: Required<ConnectionOptions>;
+  private provider: EmailProvider;
   private lastActivity: number = 0;
   private reconnecting: boolean = false;
   private connectionHealthy: boolean = false;
+  private errorClassifier: ErrorClassifier;
+  private keepAliveTimer?: NodeJS.Timeout;
+  private keepAliveInterval: number;
 
-  constructor(options?: ConnectionOptions) {
-    this.options = { ...DEFAULT_CONNECTION_OPTIONS, ...options };
+  constructor(provider: EmailProvider = 'yahoo', options?: Partial<ConnectionOptions>) {
+    // Get default options for the provider
+    const defaultOptions = getProviderConnectionOptions(provider);
+    // Merge with user-provided options
+    this.options = { ...defaultOptions, ...options };
+    this.provider = provider;
+    this.errorClassifier = new ErrorClassifier();
+    // Set Keep-Alive interval from idleTimeout configuration
+    this.keepAliveInterval = this.options.idleTimeout;
+  }
+
+  /**
+   * Calculate retry delay using exponential backoff
+   * Formula: min(baseDelay * 2^(attempt-1), maxDelay)
+   * 
+   * @param attempt - Current retry attempt number (1-based)
+   * @returns Delay in milliseconds
+   */
+  private calculateRetryDelay(attempt: number): number {
+    const baseDelay = this.options.retryDelay;
+    const maxDelay = this.options.retryDelayMax;
+    const delay = baseDelay * Math.pow(2, attempt - 1);
+    return Math.min(delay, maxDelay);
   }
 
   /**
@@ -139,7 +184,7 @@ export class IMAPConnector {
    */
   async connect(config: IMAPConfig): Promise<ConnectionResult> {
     this.config = config;
-    let lastError: string = '';
+    let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= this.options.maxRetries; attempt++) {
       try {
@@ -147,28 +192,46 @@ export class IMAPConnector {
         if (result.success) {
           this.connectionHealthy = true;
           this.lastActivity = Date.now();
+          this.startKeepAlive(); // Start keep-alive after successful connection
           return result;
         }
-        lastError = result.error || 'Unknown error';
-        
-        // Don't retry on authentication errors
-        if (lastError.includes('Authentication failed')) {
-          return result;
-        }
+        lastError = new Error(result.error || 'Unknown error');
       } catch (error) {
-        lastError = error instanceof Error ? error.message : 'Unknown error';
+        lastError = error instanceof Error ? error : new Error('Unknown error');
       }
 
-      // Wait before retry (except on last attempt)
-      if (attempt < this.options.maxRetries) {
-        console.log(`[IMAPConnector] Connection attempt ${attempt} failed, retrying in ${this.options.retryDelay}ms...`);
-        await this.delay(this.options.retryDelay);
+      // Classify error and get recovery strategy
+      if (lastError) {
+        const errorType = this.errorClassifier.classify(lastError);
+        const strategy = this.errorClassifier.getRecoveryStrategy(errorType, attempt);
+        
+        // Don't retry if strategy says so
+        if (!strategy.shouldRetry) {
+          return {
+            success: false,
+            error: `${lastError.message}. ${strategy.userMessage}`,
+          };
+        }
+        
+        // Check if we've exceeded max attempts for this error type
+        if (attempt >= strategy.maxAttempts) {
+          return {
+            success: false,
+            error: `${lastError.message}. 已达到最大重试次数。`,
+          };
+        }
+        
+        // Wait before retry
+        if (attempt < this.options.maxRetries) {
+          console.log(`[IMAPConnector] ${strategy.userMessage} (尝试 ${attempt}/${strategy.maxAttempts})`);
+          await this.delay(strategy.delay);
+        }
       }
     }
 
     return {
       success: false,
-      error: `Connection failed after ${this.options.maxRetries} attempts: ${lastError}`,
+      error: `连接失败: ${lastError?.message || 'Unknown error'}`,
     };
   }
 
@@ -296,6 +359,7 @@ export class IMAPConnector {
 
     try {
       const result = await this.connect(this.config);
+      // Keep-Alive will be started by connect() if successful
       return result.success;
     } finally {
       this.reconnecting = false;
@@ -307,6 +371,7 @@ export class IMAPConnector {
    * Safe to call even if not connected.
    */
   async disconnect(): Promise<void> {
+    this.stopKeepAlive(); // Stop keep-alive before disconnecting
     this.connectionHealthy = false;
     if (this.client) {
       try {
@@ -317,6 +382,37 @@ export class IMAPConnector {
         this.client = null;
         this.config = null;
       }
+    }
+  }
+
+  /**
+   * Start keep-alive mechanism
+   * Sends NOOP command periodically to keep connection alive
+   */
+  startKeepAlive(): void {
+    this.stopKeepAlive(); // Clear any existing timer
+    
+    this.keepAliveTimer = setInterval(async () => {
+      if (this.client && this.connectionHealthy) {
+        try {
+          await this.client.noop();
+          this.lastActivity = Date.now();
+          console.log('[IMAPConnector] Keep-alive NOOP sent');
+        } catch (error) {
+          console.error('[IMAPConnector] Keep-alive failed:', error);
+          this.connectionHealthy = false;
+        }
+      }
+    }, this.keepAliveInterval);
+  }
+
+  /**
+   * Stop keep-alive mechanism
+   */
+  stopKeepAlive(): void {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = undefined;
     }
   }
 
