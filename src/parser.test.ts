@@ -161,4 +161,26 @@ describe('EmailParser', () => {
       expect(parsed.htmlContent).toContain('<p>Hello World</p>');
     });
   });
+
+  describe('buildSearchableText', () => {
+    it('includes href URLs when discount information only exists in a link', () => {
+      const searchable = parser.buildSearchableText(
+        'Shop now',
+        '<a href="https://example.com/redeem?code=SAVE123">Shop now</a>'
+      );
+
+      expect(searchable).toContain('https://example.com/redeem?code=SAVE123');
+      expect(searchable).toContain('Shop now');
+    });
+
+    it('preserves useful HTML text even when the plain-text alternative is low quality', () => {
+      const searchable = parser.buildSearchableText(
+        'View this email in a browser https://click.example.com/abc',
+        '<div>Use code <strong>SAVE123</strong> online today.</div>'
+      );
+
+      expect(searchable).toContain('View this email in a browser');
+      expect(searchable).toContain('Use code SAVE123 online today.');
+    });
+  });
 });

@@ -26,6 +26,7 @@ import {
   ValidationError,
 } from './storage.js';
 import { generateFromTarget, validateRegex, testRegexMatch } from './regex-generator.js';
+import { resolveBrowserViewSearchableText } from './browser-view-resolver.js';
 import type { IMAPConfig, FetchFilter, ExtractionPattern, ExtractionResult } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -699,7 +700,7 @@ app.post('/api/preview', async (req, res) => {
     const rawEmail = emails[0];
     console.log('[Preview] Parsing email...');
     const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
-    const content = parsed.textContent || parser.stripHtml(parsed.htmlContent || '');
+    const content = await resolveBrowserViewSearchableText(parsed.textContent, parsed.htmlContent, parser);
     
     console.log(`[Preview] Done. Content length: ${content.length}`);
     return res.json({
@@ -891,7 +892,8 @@ app.post('/api/extract', async (req, res) => {
       for (const rawEmail of batchEmails) {
         try {
           const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
-          const result = extractor.extract(parsed, extractionPattern, stripHtml);
+          const searchableText = await resolveBrowserViewSearchableText(parsed.textContent, parsed.htmlContent, parser);
+          const result = extractor.extract({ ...parsed, searchableText }, extractionPattern, stripHtml);
           results.push(result);
           
           const matchCount = result.matches.length;
@@ -1176,7 +1178,8 @@ app.post('/api/regex/validate', async (req, res) => {
         console.log(`[Validate] Processing email ${i + 1}/${rawEmails.length}: ${rawEmail.subject?.substring(0, 50)}...`);
         
         const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
-        const result = extractor.extract(parsed, extractionPattern, stripHtml);
+        const searchableText = await resolveBrowserViewSearchableText(parsed.textContent, parsed.htmlContent, parser);
+        const result = extractor.extract({ ...parsed, searchableText }, extractionPattern, stripHtml);
         
         console.log(`[Validate] Found ${result.matches.length} matches`);
         
@@ -2477,13 +2480,15 @@ app.post('/api/emails/content', async (req, res) => {
           // Parse the email to extract body
           const parser = new EmailParser();
           const parsed = await parser.parse(rawSource, message.uid);
+          const searchableContent = await resolveBrowserViewSearchableText(parsed.textContent, parsed.htmlContent, parser);
           
           // Prefer HTML content if available, otherwise use text
-          const bodyContent = parsed.htmlContent || parsed.textContent || '';
+          const bodyContent = parsed.htmlContent || searchableContent || '';
           const isHtml = !!parsed.htmlContent;
           
-          // For raw content, use text version or strip HTML
-          const rawContent = parsed.textContent || (isHtml ? parser.stripHtml(bodyContent) : bodyContent);
+          // For raw content, use the normalized searchable text so users can inspect
+          // values that only exist in HTML or href attributes.
+          const rawContent = searchableContent || (isHtml ? parser.stripHtml(bodyContent) : bodyContent);
           
           emailContent = {
             uid: message.uid,

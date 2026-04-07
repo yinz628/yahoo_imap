@@ -137,6 +137,8 @@ export interface ParsedEmail {
   textContent: string;
   /** Extracted HTML content (if available) */
   htmlContent?: string;
+  /** Enriched searchable content assembled from email text, HTML, and related sources */
+  searchableText?: string;
 }
 
 /**

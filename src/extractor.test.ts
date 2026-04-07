@@ -263,5 +263,27 @@ describe('RegexExtractor', () => {
       expect(result.matches.length).toBe(1);
       expect(result.matches[0].groups.orderId).toBe('12345');
     });
+
+    it('extracts discount codes from href URLs when the visible text does not contain the code', () => {
+      const email: ParsedEmail = {
+        uid: 1,
+        date: new Date(),
+        from: 'test@example.com',
+        subject: 'Test',
+        textContent: 'Shop now',
+        htmlContent: '<a href="https://example.com/redeem?code=SAVE123">Shop now</a>',
+      };
+
+      const pattern: ExtractionPattern = {
+        name: 'link-code-pattern',
+        pattern: 'code=(?<code>[A-Z0-9]+)',
+        flags: '',
+      };
+
+      const result = extractor.extract(email, pattern, true);
+
+      expect(result.matches.length).toBe(1);
+      expect(result.matches[0].groups.code).toBe('SAVE123');
+    });
   });
 });

@@ -25,16 +25,9 @@ export class RegexExtractor {
     const matches: ExtractionMatch[] = [];
     
     try {
-      // Determine content to search
-      let content = email.textContent;
-      
-      // If HTML content exists and stripHtml is enabled, use stripped HTML
-      if (stripHtml && email.htmlContent) {
-        content = this.parser.stripHtml(email.htmlContent);
-      } else if (!content && email.htmlContent) {
-        // Fallback to HTML content if no text content
-        content = stripHtml ? this.parser.stripHtml(email.htmlContent) : email.htmlContent;
-      }
+      // Build a searchable representation that includes plain text, useful HTML text,
+      // and href URLs. This avoids losing codes that only exist in one representation.
+      const content = email.searchableText || this.parser.buildSearchableText(email.textContent, email.htmlContent);
 
       if (!content) {
         return { email, matches: [], patternName: pattern.name };

@@ -9,6 +9,7 @@ import { EmailParser } from './parser.js';
 import { RegexExtractor } from './extractor.js';
 import { ConfigManager } from './config.js';
 import { BatchProcessor, ProgressInfo } from './errors.js';
+import { resolveBrowserViewSearchableText } from './browser-view-resolver.js';
 import { CSVExporter } from './exporters/csv.js';
 import { ExcelExporter } from './exporters/excel.js';
 import { SQLiteExporter } from './exporters/sqlite.js';
@@ -286,9 +287,10 @@ async function runExtract(options: any): Promise<void> {
         async () => {
           // Parse email
           const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
+          const searchableText = await resolveBrowserViewSearchableText(parsed.textContent, parsed.htmlContent, parser);
           
           // Extract data
-          return extractor.extract(parsed, pattern, options.stripHtml);
+          return extractor.extract({ ...parsed, searchableText }, pattern, options.stripHtml);
         }
       );
 

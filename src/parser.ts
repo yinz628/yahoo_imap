@@ -37,6 +37,42 @@ export class EmailParser {
   }
 
   /**
+   * Build a searchable text representation from plain text and HTML email parts.
+   * Keeps the plain-text alternative, visible HTML text, and href URLs so extraction
+   * can still work when any single representation is incomplete.
+   */
+  buildSearchableText(textContent: string, htmlContent?: string): string {
+    const segments: string[] = [];
+    const seen = new Set<string>();
+
+    const addSegment = (value: string | undefined) => {
+      if (!value) {
+        return;
+      }
+
+      const normalized = this.normalizeSearchSegment(value);
+      if (!normalized || seen.has(normalized)) {
+        return;
+      }
+
+      seen.add(normalized);
+      segments.push(normalized);
+    };
+
+    addSegment(textContent);
+
+    if (htmlContent) {
+      addSegment(this.stripHtml(htmlContent));
+
+      for (const link of this.extractHrefUrls(htmlContent)) {
+        addSegment(link);
+      }
+    }
+
+    return segments.join('\n\n');
+  }
+
+  /**
    * Strip HTML tags from content, preserving text content.
    * Handles various HTML constructs including:
    * - Regular HTML tags
@@ -72,6 +108,33 @@ export class EmailParser {
     result = result.replace(/\s+/g, ' ').trim();
 
     return result;
+  }
+
+  private extractHrefUrls(html: string): string[] {
+    if (!html) {
+      return [];
+    }
+
+    const urls: string[] = [];
+    const hrefRegex = /<a\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+
+    for (const match of html.matchAll(hrefRegex)) {
+      const rawUrl = match[1] || match[2] || match[3] || '';
+      const decodedUrl = this.decodeHtmlEntities(rawUrl).trim();
+      const lowerUrl = decodedUrl.toLowerCase();
+
+      if (!decodedUrl || lowerUrl.startsWith('javascript:') || lowerUrl.startsWith('cid:')) {
+        continue;
+      }
+
+      urls.push(decodedUrl);
+    }
+
+    return urls;
+  }
+
+  private normalizeSearchSegment(value: string): string {
+    return value.replace(/\s+/g, ' ').trim();
   }
 
   /**
