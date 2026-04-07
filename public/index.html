@@ -1903,6 +1903,13 @@
                 <input type="checkbox" id="stripHtml">
                 <label for="stripHtml">提取前去除 HTML 标签</label>
               </div>
+              <div class="checkbox-group" style="margin-top:12px;">
+                <input type="checkbox" id="useBrowserViewContent">
+                <label for="useBrowserViewContent">从浏览器版邮件链接读取内容（较慢）</label>
+              </div>
+              <small style="display:block; color:#666; margin-top:6px;">
+                仅在部分邮件需要。开启后会访问 `click.email.*` / `view.email.*` 链接补充提取文本。
+              </small>
               <div class="form-group" style="margin-top:15px;">
                 <label>提取速度 (每封邮件延迟 ms)</label>
                 <div style="display:flex; gap:10px; align-items:center;">
@@ -5060,6 +5067,10 @@
       };
     }
 
+    function useBrowserViewContentEnabled() {
+      return document.getElementById('useBrowserViewContent').checked;
+    }
+
     async function countEmails() {
       const countResult = document.getElementById('countResult');
       countResult.classList.remove('hidden');
@@ -5112,7 +5123,11 @@
       clearRuleEditor();
       
       try {
-        const res = await apiPost('/api/preview', { sessionId, filter: getFilter() });
+        const res = await apiPost('/api/preview', {
+          sessionId,
+          filter: getFilter(),
+          useBrowserViewContent: useBrowserViewContentEnabled()
+        });
         
         const data = await res.json();
         if (data.error) {
@@ -5506,6 +5521,7 @@
               flags: document.getElementById('patternFlags').value
             },
             stripHtml: document.getElementById('stripHtml').checked,
+            useBrowserViewContent: useBrowserViewContentEnabled(),
             delayMs: delayMs,
             skipCount: skipCount
           })
@@ -6214,6 +6230,7 @@
           flags: document.getElementById('patternFlags').value
         },
         stripHtml: document.getElementById('stripHtml').checked,
+        useBrowserViewContent: useBrowserViewContentEnabled(),
         delayMs: document.getElementById('delayMs').value
       };
       
@@ -6241,6 +6258,7 @@
         document.getElementById('pattern').value = settings.pattern?.pattern || '';
         document.getElementById('patternFlags').value = settings.pattern?.flags || 'g';
         document.getElementById('stripHtml').checked = settings.stripHtml || false;
+        document.getElementById('useBrowserViewContent').checked = settings.useBrowserViewContent || false;
         document.getElementById('delayMs').value = settings.delayMs || 100;
         document.getElementById('delayValue').textContent = (settings.delayMs || 100) + 'ms';
         
@@ -7390,6 +7408,7 @@
               flags: document.getElementById('patternFlags').value
             },
             stripHtml: document.getElementById('stripHtml').checked,
+            useBrowserViewContent: useBrowserViewContentEnabled(),
             count: 3
           }),
           signal: controller.signal

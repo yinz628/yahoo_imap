@@ -9,9 +9,15 @@ const MAX_REMOTE_HTML_LENGTH = 500000;
 export async function resolveBrowserViewSearchableText(
   textContent: string,
   htmlContent: string | undefined,
-  parser: EmailParser
+  parser: EmailParser,
+  enabled: boolean = false
 ): Promise<string> {
   const baseSearchableText = parser.buildSearchableText(textContent, htmlContent);
+
+  if (!enabled) {
+    return baseSearchableText;
+  }
+
   const browserViewUrls = extractBrowserViewUrls(baseSearchableText).slice(0, MAX_BROWSER_VIEW_URLS);
 
   if (browserViewUrls.length === 0) {

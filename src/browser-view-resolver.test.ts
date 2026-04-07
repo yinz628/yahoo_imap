@@ -26,7 +26,8 @@ describe('resolveBrowserViewSearchableText', () => {
     const searchable = await resolveBrowserViewSearchableText(
       'View this email in a browser https://click.email.bloomingdales.com/?qs=test',
       undefined,
-      parser
+      parser,
+      true
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -46,5 +47,20 @@ describe('resolveBrowserViewSearchableText', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(searchable).toBe('Check this order https://example.com/order?id=123');
+  });
+
+  it('does not fetch browser-view links when the feature is disabled', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const searchable = await resolveBrowserViewSearchableText(
+      'View this email in a browser https://click.email.bloomingdales.com/?qs=test',
+      undefined,
+      parser,
+      false
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(searchable).toBe('View this email in a browser https://click.email.bloomingdales.com/?qs=test');
   });
 });

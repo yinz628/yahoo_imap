@@ -670,7 +670,7 @@ app.post('/api/count', async (req, res) => {
 
 // Preview first email endpoint
 app.post('/api/preview', async (req, res) => {
-  const { sessionId, filter } = req.body;
+  const { sessionId, filter, useBrowserViewContent = false } = req.body;
   const session = await ensureSessionConnected(sessionId);
   
   if (!session) {
@@ -700,7 +700,12 @@ app.post('/api/preview', async (req, res) => {
     const rawEmail = emails[0];
     console.log('[Preview] Parsing email...');
     const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
-    const content = await resolveBrowserViewSearchableText(parsed.textContent, parsed.htmlContent, parser);
+    const content = await resolveBrowserViewSearchableText(
+      parsed.textContent,
+      parsed.htmlContent,
+      parser,
+      useBrowserViewContent
+    );
     
     console.log(`[Preview] Done. Content length: ${content.length}`);
     return res.json({
@@ -719,7 +724,7 @@ app.post('/api/preview', async (req, res) => {
 
 // Extract endpoint - batch processing with auto-reconnect and resume capability
 app.post('/api/extract', async (req, res) => {
-  const { sessionId, filter, pattern, stripHtml, delayMs = 100, skipCount = 0 } = req.body;
+  const { sessionId, filter, pattern, stripHtml, useBrowserViewContent = false, delayMs = 100, skipCount = 0 } = req.body;
   let session = await ensureSessionConnected(sessionId);
   
   if (!session) {
@@ -746,7 +751,9 @@ app.post('/api/extract', async (req, res) => {
 
   console.log(`[Extract] Starting extraction with pattern: ${pattern.pattern}`);
   console.log(`[Extract] Filter: ${JSON.stringify(fetchFilter)}`);
-  console.log(`[Extract] Delay: ${delayMs}ms, StripHtml: ${stripHtml}, Skip: ${skipCount}`);
+  console.log(
+    `[Extract] Delay: ${delayMs}ms, StripHtml: ${stripHtml}, BrowserView: ${useBrowserViewContent}, Skip: ${skipCount}`
+  );
 
   // Helper function to reconnect with exponential backoff
   const reconnect = async (attempt: number): Promise<boolean> => {
@@ -892,7 +899,12 @@ app.post('/api/extract', async (req, res) => {
       for (const rawEmail of batchEmails) {
         try {
           const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
-          const searchableText = await resolveBrowserViewSearchableText(parsed.textContent, parsed.htmlContent, parser);
+          const searchableText = await resolveBrowserViewSearchableText(
+            parsed.textContent,
+            parsed.htmlContent,
+            parser,
+            useBrowserViewContent
+          );
           const result = extractor.extract({ ...parsed, searchableText }, extractionPattern, stripHtml);
           results.push(result);
           
@@ -1137,7 +1149,7 @@ app.post('/api/regex/test', async (req, res) => {
 
 // Validate regex against multiple emails endpoint
 app.post('/api/regex/validate', async (req, res) => {
-  const { sessionId, filter, pattern, stripHtml, count = 3 } = req.body;
+  const { sessionId, filter, pattern, stripHtml, useBrowserViewContent = false, count = 3 } = req.body;
   const session = await ensureSessionConnected(sessionId);
   
   if (!session) {
@@ -1178,7 +1190,12 @@ app.post('/api/regex/validate', async (req, res) => {
         console.log(`[Validate] Processing email ${i + 1}/${rawEmails.length}: ${rawEmail.subject?.substring(0, 50)}...`);
         
         const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
-        const searchableText = await resolveBrowserViewSearchableText(parsed.textContent, parsed.htmlContent, parser);
+        const searchableText = await resolveBrowserViewSearchableText(
+          parsed.textContent,
+          parsed.htmlContent,
+          parser,
+          useBrowserViewContent
+        );
         const result = extractor.extract({ ...parsed, searchableText }, extractionPattern, stripHtml);
         
         console.log(`[Validate] Found ${result.matches.length} matches`);
@@ -2480,7 +2497,12 @@ app.post('/api/emails/content', async (req, res) => {
           // Parse the email to extract body
           const parser = new EmailParser();
           const parsed = await parser.parse(rawSource, message.uid);
-          const searchableContent = await resolveBrowserViewSearchableText(parsed.textContent, parsed.htmlContent, parser);
+          const searchableContent = await resolveBrowserViewSearchableText(
+            parsed.textContent,
+            parsed.htmlContent,
+            parser,
+            true
+          );
           
           // Prefer HTML content if available, otherwise use text
           const bodyContent = parsed.htmlContent || searchableContent || '';
