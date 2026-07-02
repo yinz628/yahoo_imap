@@ -62,7 +62,7 @@ describe('CSVExporter', () => {
   describe('serialize', () => {
     it('should serialize empty results', () => {
       const csv = exporter.serialize([]);
-      expect(csv).toBe('emailUid,emailDate,emailFrom,emailSubject,matchIndex,fullMatch');
+      expect(csv).toBe('emailUid,emailDate,emailFrom,emailTo,emailSubject,matchIndex,fullMatch');
     });
 
     it('should serialize results with matches', () => {

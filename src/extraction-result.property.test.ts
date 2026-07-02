@@ -134,29 +134,29 @@ describe('Extraction Result Completeness', () => {
         parsedEmailArbitrary,
         fc.integer({ min: 1, max: 10 }),
         (email, matchCount) => {
-          const pattern = 'CODE';
-          
-          // Create content with multiple matches
-          const matches = Array(matchCount).fill('CODE').join(' ');
+          // Use DISTINCT codes so each occurrence survives deduplication.
+          // (The extractor collapses identical match strings to a single result,
+          // so repeating the literal 'CODE' would yield only one match.)
+          const codes = Array.from({ length: matchCount }, (_, i) => `CODE${i}`);
           const testEmail: ParsedEmail = {
             ...email,
-            textContent: `Codes: ${matches}`,
+            textContent: `Codes: ${codes.join(' ')}`,
           };
 
           const extractionPattern: ExtractionPattern = {
             name: 'multi-code-pattern',
-            pattern: pattern,
+            pattern: 'CODE\\d+',
             flags: 'g',
           };
 
           const result: ExtractionResult = extractor.extract(testEmail, extractionPattern);
 
-          // Should find all matches
+          // Should find all distinct matches
           expect(result.matches.length).toBe(matchCount);
-          
+
           // All matches should have the same source email info
-          for (const match of result.matches) {
-            expect(match.fullMatch).toBe('CODE');
+          for (let i = 0; i < result.matches.length; i++) {
+            expect(result.matches[i].fullMatch).toBe(codes[i]);
             expect(result.email.subject).toBe(email.subject);
             expect(result.email.date).toEqual(email.date);
             expect(result.email.from).toBe(email.from);

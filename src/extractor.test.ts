@@ -27,10 +27,10 @@ describe('RegexExtractor', () => {
       // Generate a simple word to search for (alphanumeric only to avoid regex special chars)
       const wordArb = fc.string({ minLength: 2, maxLength: 8 })
         .filter(s => /^[a-zA-Z]+$/.test(s));
-      
+
       // Generate number of occurrences
       const countArb = fc.integer({ min: 0, max: 10 });
-      
+
       // Generate filler text (without the search word)
       const fillerArb = fc.string({ minLength: 0, maxLength: 20 })
         .filter(s => /^[0-9\s]*$/.test(s)); // Only digits and spaces
@@ -55,9 +55,14 @@ describe('RegexExtractor', () => {
 
           const result = extractor.extract(email, pattern);
 
-          // Should find exactly 'count' matches
-          expect(result.matches.length).toBe(count);
-          
+          // The extractor deduplicates identical match strings (same code appearing
+          // multiple times in one email yields a single result). Since the generated
+          // content repeats the same word, the expected unique match count is:
+          //   - 0 when count == 0 (no occurrence)
+          //   - 1 when count >= 1 (the word is always identical, deduplicated to one)
+          const expectedUnique = count === 0 ? 0 : 1;
+          expect(result.matches.length).toBe(expectedUnique);
+
           // Each match should be the word we searched for
           for (const match of result.matches) {
             expect(match.fullMatch).toBe(word);

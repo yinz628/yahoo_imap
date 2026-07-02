@@ -63,9 +63,12 @@ describe('EmailParser', () => {
           // Wrap text in various HTML tags
           const html = `<div><p>${text}</p></div>`;
           const stripped = parser.stripHtml(html);
-          
-          // The stripped result should contain the original text
-          expect(stripped).toContain(text.trim());
+
+          // stripHtml collapses internal whitespace runs into a single space and
+          // trims the result, so the assertion must compare against the same
+          // normalization rather than the raw (trimmed) input.
+          const normalized = text.trim().replace(/\s+/g, ' ');
+          expect(stripped).toContain(normalized);
         }),
         { numRuns: 100 }
       );
