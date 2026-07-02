@@ -1742,6 +1742,20 @@
             
             <!-- Email Preview with Search - Requirements: 2.3, 2.4, 2.5 -->
             <div id="previewContainer" class="hidden" style="margin-top:15px;">
+              <!-- Preview Options - open browser-view links / strip HTML tags -->
+              <div class="preview-options" style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; padding:10px 12px; background:#fafafa; border:1px solid #e0e0e0; border-radius:6px; margin-bottom:10px;">
+                <label class="checkbox-group" style="font-size:13px; cursor:pointer;">
+                  <input type="checkbox" id="previewBrowserView">
+                  🌐 打开浏览器版邮件链接（较慢）
+                </label>
+                <label class="checkbox-group" style="font-size:13px; cursor:pointer;">
+                  <input type="checkbox" id="previewStripHtml">
+                  🧹 去除 HTML 标签
+                </label>
+                <small style="color:#666; font-size:11px; flex-basis:100%;">
+                  部分邮件正文仅含"在线查看"链接，开启后抓取真实内容。两个开关独立于提取设置，仅影响预览显示。
+                </small>
+              </div>
               <!-- Search Box - Requirements: 2.3, 2.4 -->
               <div class="preview-search-box" id="previewSearchBox">
                 <input type="text" id="previewSearchInput" placeholder="在邮件中搜索..." onkeydown="handlePreviewSearchKeydown(event)">
@@ -5123,12 +5137,20 @@
       clearRuleEditor();
       
       try {
+        const useBrowserView = document.getElementById('previewBrowserView').checked;
+        const stripHtml = document.getElementById('previewStripHtml').checked;
+
+        if (useBrowserView) {
+          previewResult.innerHTML = escapeHtml('正在打开浏览器版邮件链接并抓取内容，请稍候...');
+        }
+
         const res = await apiPost('/api/preview', {
           sessionId,
           filter: getFilter(),
-          useBrowserViewContent: useBrowserViewContentEnabled()
+          useBrowserViewContent: useBrowserView,
+          stripHtml: stripHtml
         });
-        
+
         const data = await res.json();
         if (data.error) {
           previewResult.innerHTML = escapeHtml('错误: ' + data.error);
@@ -5141,10 +5163,20 @@
             date: data.date,
             contentLength: data.contentLength
           };
-          
-          const preview = `=== 主题: ${data.subject} ===\n=== 发件人: ${data.from} ===\n=== 日期: ${data.date} ===\n=== 内容长度: ${data.contentLength} 字符 ===\n\n${data.content}`;
+
+          // Build a hint line so the user knows which preview options were applied
+          const hints = [];
+          if (data.browserViewUsed) {
+            hints.push('🌐 已打开浏览器版邮件链接');
+          }
+          if (stripHtml) {
+            hints.push('🧹 已去除 HTML 标签');
+          }
+          const hintLine = hints.length ? `\n=== 预览选项: ${hints.join(' | ')} ===` : '';
+
+          const preview = `=== 主题: ${data.subject} ===\n=== 发件人: ${data.from} ===\n=== 日期: ${data.date} ===\n=== 内容长度: ${data.contentLength} 字符 ===${hintLine}\n\n${data.content}`;
           previewResult.innerHTML = escapeHtml(preview);
-          
+
           // Enable text selection for rule generation
           setupTextSelectionHandler();
         } else {

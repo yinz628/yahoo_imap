@@ -670,9 +670,9 @@ app.post('/api/count', async (req, res) => {
 
 // Preview first email endpoint
 app.post('/api/preview', async (req, res) => {
-  const { sessionId, filter, useBrowserViewContent = false } = req.body;
+  const { sessionId, filter, useBrowserViewContent = false, stripHtml = false } = req.body;
   const session = await ensureSessionConnected(sessionId);
-  
+
   if (!session) {
     return res.status(400).json({ error: 'Not connected' });
   }
@@ -691,29 +691,40 @@ app.post('/api/preview', async (req, res) => {
   try {
     console.log('[Preview] Fetching first email...');
     const emails = await fetcher.fetchLimited(session.connection, fetchFilter, 1);
-    
+
     if (emails.length === 0) {
       console.log('[Preview] No emails found');
       return res.json({ content: null });
     }
-    
+
     const rawEmail = emails[0];
     console.log('[Preview] Parsing email...');
     const parsed = await parser.parse(Buffer.from(rawEmail.body), rawEmail.uid);
-    const content = await resolveBrowserViewSearchableText(
+
+    // Build the searchable text, optionally pulling content from browser-view links
+    const searchableText = await resolveBrowserViewSearchableText(
       parsed.textContent,
       parsed.htmlContent,
       parser,
       useBrowserViewContent
     );
-    
-    console.log(`[Preview] Done. Content length: ${content.length}`);
+
+    // Preview content respects the stripHtml toggle.
+    // - stripHtml=true  -> force strip the merged text once more for a clean view
+    // - stripHtml=false -> show the raw searchable text as-is (current default behavior)
+    const content = stripHtml ? parser.stripHtml(searchableText) : searchableText;
+
+    console.log(
+      `[Preview] Done. Content length: ${content.length}, StripHtml: ${stripHtml}, BrowserView: ${useBrowserViewContent}`
+    );
     return res.json({
       subject: parsed.subject,
       from: parsed.from,
       date: parsed.date.toISOString(),
       content: content,
-      contentLength: content.length
+      contentLength: content.length,
+      // Whether browser-view links were actually fetched, so the UI can show a hint
+      browserViewUsed: useBrowserViewContent,
     });
   } catch (error) {
     console.error('[Preview] Error:', error);

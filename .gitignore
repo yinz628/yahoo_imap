@@ -31,3 +31,9 @@ Thumbs.db
 # Test output
 coverage/
 *.log
+
+# Local deployment scripts containing VPS credentials
+ssh/
+
+# Project analysis notes (local only)
+PROJECT_ANALYSIS.md
