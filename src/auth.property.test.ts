@@ -49,7 +49,9 @@ import { register, login, AuthError } from './auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const USERS_FILE = join(__dirname, '../data/users.json');
+// Respect the DATA_DIR env var set by globalSetup so cleanup targets the
+// isolated temp dir, not the real ./data/users.json.
+const USERS_FILE = join(process.env.DATA_DIR || join(__dirname, '../data'), 'users.json');
 
 async function cleanupTestUsers(): Promise<void> {
   try {

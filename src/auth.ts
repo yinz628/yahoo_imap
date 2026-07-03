@@ -10,7 +10,9 @@ const __dirname = dirname(__filename);
 // Constants
 const SALT_ROUNDS = 10;
 const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
-const DATA_DIR = join(__dirname, '../data');
+// Allow tests to redirect data to a temp dir via DATA_DIR env var.
+// In production this is unset, so it falls back to the project's ./data folder.
+const DATA_DIR = process.env.DATA_DIR || join(__dirname, '../data');
 const USERS_FILE = join(DATA_DIR, 'users.json');
 
 // Interfaces

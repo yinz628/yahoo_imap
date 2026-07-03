@@ -8,7 +8,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Constants
-const DATA_DIR = join(__dirname, '../data');
+// Allow tests to redirect data to a temp dir via DATA_DIR env var.
+// In production this is unset, so it falls back to the project's ./data folder.
+const DATA_DIR = process.env.DATA_DIR || join(__dirname, '../data');
 const USERS_DIR = join(DATA_DIR, 'users');
 
 // Encryption key for mailbox passwords (in production, use environment variable)

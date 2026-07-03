@@ -5,6 +5,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Redirect all file-writing tests to a temp dir via DATA_DIR env var,
+    // so they can never pollute the real ./data/users.json etc.
+    globalSetup: ['./src/test-setup.ts'],
     // Run tests sequentially to avoid file corruption when multiple tests
     // access the same users.json file
     fileParallelism: false,

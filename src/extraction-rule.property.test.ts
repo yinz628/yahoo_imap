@@ -19,7 +19,9 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const DATA_DIR = join(__dirname, '../data');
+// Respect the DATA_DIR env var set by globalSetup so cleanup targets the
+// isolated temp dir, not the real ./data folder.
+const DATA_DIR = process.env.DATA_DIR || join(__dirname, '../data');
 const USERS_DIR = join(DATA_DIR, 'users');
 
 // Cleanup helper

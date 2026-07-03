@@ -39,7 +39,9 @@ describe('Complete User Flow Integration Tests', () => {
     }
     
     // Remove test user from users.json
-    const usersPath = path.join(process.cwd(), 'data', 'users.json');
+    // Respect the DATA_DIR env var set by globalSetup so cleanup targets the
+    // isolated temp dir, not the real ./data/users.json.
+    const usersPath = path.join(process.env.DATA_DIR || path.join(process.cwd(), 'data'), 'users.json');
     if (fs.existsSync(usersPath)) {
       try {
         const data = JSON.parse(fs.readFileSync(usersPath, 'utf-8'));
@@ -237,7 +239,9 @@ describe('Discount Code Extraction Workflow - Complete Flow', () => {
       }
     }
     
-    const usersPath = path.join(process.cwd(), 'data', 'users.json');
+    // Respect the DATA_DIR env var set by globalSetup so cleanup targets the
+    // isolated temp dir, not the real ./data/users.json.
+    const usersPath = path.join(process.env.DATA_DIR || path.join(process.cwd(), 'data'), 'users.json');
     if (fs.existsSync(usersPath)) {
       try {
         const data = JSON.parse(fs.readFileSync(usersPath, 'utf-8'));
